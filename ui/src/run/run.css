@@ -1,0 +1,109 @@
+.run {
+  margin-top: 1.5rem;
+  padding: 1rem;
+  background: var(--panel, #fffdf8);
+  border: 1px solid var(--line, #ddd4c6);
+  font-family: "Segoe UI", system-ui, sans-serif;
+}
+
+.run__header {
+  margin-bottom: 1rem;
+}
+
+.run__kicker {
+  margin: 0 0 0.25rem;
+  color: var(--accent, #8a4b24);
+  font-size: 0.72rem;
+  font-weight: 650;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.run__heading {
+  margin: 0;
+  font-family: Cambria, "Iowan Old Style", Palatino, Georgia, serif;
+  font-size: 1.45rem;
+  line-height: 1.2;
+}
+
+.run__controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.9rem 1rem;
+  align-items: center;
+}
+
+.run__button {
+  min-height: 2.5rem;
+  padding: 0.65rem 1rem;
+  color: #fffdf8;
+  background: var(--accent, #8a4b24);
+  border: 2px solid var(--accent, #8a4b24);
+  border-radius: 0.2rem;
+  cursor: pointer;
+  font: inherit;
+  font-weight: 650;
+}
+
+.run__button:hover:not(:disabled) {
+  background: #713817;
+  border-color: #713817;
+}
+
+.run__button:focus-visible {
+  outline: 3px solid #1c1915;
+  outline-offset: 3px;
+}
+
+.run__button:disabled {
+  cursor: not-allowed;
+  opacity: 0.62;
+}
+
+.run__status {
+  display: flex;
+  flex: 1 1 18rem;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+  align-items: center;
+  min-width: 0;
+  color: var(--muted, #5e584e);
+  font-size: 0.95rem;
+}
+
+.run__spinner {
+  width: 1rem;
+  height: 1rem;
+  border: 2px solid var(--line, #ddd4c6);
+  border-top-color: var(--accent, #8a4b24);
+  border-radius: 999px;
+}
+
+.run__spinner--active {
+  animation: run-spin 0.8s linear infinite;
+}
+
+.run__step {
+  font-weight: 650;
+}
+
+.run__sentence {
+  color: var(--ink, #1c1915);
+}
+
+.run__error {
+  color: #8b1e16;
+  font-weight: 650;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .run__spinner--active {
+    animation: none;
+  }
+}
+
+@keyframes run-spin {
+  to {
+    transform: rotate(1turn);
+  }
+}
