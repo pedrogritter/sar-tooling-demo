@@ -18,6 +18,7 @@ import math
 import os
 import time
 import urllib.request
+from collections.abc import Callable
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -37,27 +38,54 @@ BRIDGE_MIN_M = 400.0
 MOVER_MIN_M = 8.0
 DECK_BUFFER_M = 40.0
 CALIBRATION = 1.3405353724476985e-05
+OnStep = Callable[[int, str], None]
+STEP_SENTENCES = (
+    "Checking that the GRD is on disk.",
+    "Checking that the dwell stack is on disk.",
+    "Checking the sub-aperture image.",
+    "Measuring dark water and the deck return.",
+    "Tracking bright returns across the dwell.",
+    "Comparing each return with its sub-aperture neighborhood.",
+    "Recording the SLC sidecar without detecting on it.",
+    "Drawing the overview.",
+    "Writing the measurement, the GeoJSON, and the briefing.",
+)
 
 
 def main() -> None:
-    wait_for("grd-cog.tif")
-    wait_for("vid-cog.tif")
-    csi_ready = wait_for("csi-cog.tif")
+    run_measurement()
+
+
+def run_measurement(on_step: OnStep | None = None) -> None:
+    if on_step is None:
+        on_step = _print_step
+
+    on_step(1, STEP_SENTENCES[0])
+    _require_local_raster("grd-cog.tif")
+    on_step(2, STEP_SENTENCES[1])
+    _require_local_raster("vid-cog.tif")
+    on_step(3, STEP_SENTENCES[2])
+    csi_ready = (DATA / "csi-cog.tif").is_file()
     OUT.mkdir(parents=True, exist_ok=True)
 
+    on_step(4, STEP_SENTENCES[3])
     grd_meta = json.loads((DATA / "grd-json.json").read_text(encoding="utf-8"))
-    vid_meta = json.loads((DATA / "vid-json.json").read_text(encoding="utf-8"))
-    stac = json.loads((DATA / "stac.json").read_text(encoding="utf-8"))
     grd = load_reduced(DATA / "grd-cog.tif")
     scene = measure_grd(
         grd, Grid.from_transform(grd_meta["properties"]["proj:transform"])
     )
+    on_step(5, STEP_SENTENCES[4])
+    vid_meta = json.loads((DATA / "vid-json.json").read_text(encoding="utf-8"))
+    stac = json.loads((DATA / "stac.json").read_text(encoding="utf-8"))
     vid, vid_scale = load_video(DATA / "vid-cog.tif")
     vid_grid = Grid.from_transform(vid_meta["properties"]["proj:transform"])
     measure_motion(scene, vid, vid_grid, vid_scale, stac["properties"])
+    on_step(6, STEP_SENTENCES[5])
     if csi_ready:
         measure_subaperture(scene, load_reduced(DATA / "csi-cog.tif"))
+    on_step(7, STEP_SENTENCES[6])
     scene["slc"] = slc_note()
+    on_step(8, STEP_SENTENCES[7])
     save_overview(
         scene["_mean"],
         scene["_water"],
@@ -66,10 +94,23 @@ def main() -> None:
         scene["_grid"],
         scene["_scale"],
     )
+    on_step(9, STEP_SENTENCES[8])
     write_products(scene)
     briefing = model_briefing(scene) or render_briefing(scene)
     (OUT / "briefing.md").write_text(briefing, encoding="utf-8")
     print(f"wrote {OUT}")
+
+
+def _print_step(index: int, sentence: str) -> None:
+    print(f"{index}. {sentence}")
+
+
+def _require_local_raster(raster_name: str) -> None:
+    raster = DATA / raster_name
+    if not raster.is_file():
+        raise RuntimeError(
+            f"Missing data/{raster_name}. Run python3 scene.py --all."
+        )
 
 
 def wait_for(raster_name: str, required: bool = True) -> bool:
