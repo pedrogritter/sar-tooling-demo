@@ -15,12 +15,12 @@
       "handoffPath": "handoffs/python-job-api.md",
       "startedAt": "2026-11-09T16:52:43.907Z",
       "finishedAt": "2026-11-09T17:01:42.577Z",
-      "lastUpdate": "2026-11-09T17:01:42.577Z",
+      "lastUpdate": "2026-11-09T17:01:44.423Z",
       "note": null,
       "slackTs": null,
       "prNumber": null,
       "failureMode": null,
-      "verification": null,
+      "verification": "unit-test-verified",
       "attempts": 1
     },
     {
@@ -78,17 +78,18 @@
       "agentId": null,
       "runId": null,
       "parentAgentId": null,
-      "status": "pending",
+      "status": "running",
       "resultStatus": null,
       "handoffPath": null,
-      "startedAt": null,
+      "startedAt": "2026-11-09T17:01:53.962Z",
       "finishedAt": null,
-      "lastUpdate": null,
+      "lastUpdate": "2026-11-09T17:01:53.962Z",
       "note": null,
       "slackTs": null,
       "prNumber": null,
       "failureMode": null,
-      "verification": null
+      "verification": null,
+      "attempts": 1
     },
     {
       "name": "join-scene-web",
@@ -148,6 +149,10 @@
     {
       "at": "2026-11-09T16:56:44.716Z",
       "message": "preview-shell: verification self-reported (not-verified)"
+    },
+    {
+      "at": "2026-11-09T17:01:44.423Z",
+      "message": "python-job-api: verification self-reported (unit-test-verified)"
     }
   ]
 }
