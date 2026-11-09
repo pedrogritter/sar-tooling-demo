@@ -102,18 +102,18 @@
         "run-results",
         "verify-python-job-api"
       ],
-      "agentId": null,
-      "runId": null,
-      "parentAgentId": null,
-      "status": "running",
-      "resultStatus": null,
-      "handoffPath": null,
+      "agentId": "bc-e4184a2d-d304-4eae-b778-e183b704f066",
+      "runId": "run-3334524b-cfb0-41bb-8d7b-f18e2efed865",
+      "parentAgentId": "bc-d9aeca72-36a7-4d82-a59d-a6db9c89b4fd",
+      "status": "handed-off",
+      "resultStatus": "finished",
+      "handoffPath": "handoffs/join-scene-web.md",
       "startedAt": "2026-11-09T17:05:49.145Z",
-      "finishedAt": null,
-      "lastUpdate": "2026-11-09T17:05:49.145Z",
+      "finishedAt": "2026-11-09T17:46:56.136Z",
+      "lastUpdate": "2026-11-09T17:46:56.137Z",
       "note": null,
       "slackTs": null,
-      "prNumber": null,
+      "prNumber": 1,
       "failureMode": null,
       "verification": null,
       "attempts": 1
@@ -154,6 +154,14 @@
     {
       "at": "2026-11-09T17:01:44.423Z",
       "message": "python-job-api: verification self-reported (unit-test-verified)"
+    },
+    {
+      "at": "2026-11-09T17:18:59.172Z",
+      "message": "join-scene-web: tool_call idle 358201ms; last=2026-11-09T17:13:00.971Z"
+    },
+    {
+      "at": "2026-11-09T17:23:05.598Z",
+      "message": "join-scene-web: SSE idle 346911ms, polled status=running; watchdog still waiting"
     }
   ]
 }
