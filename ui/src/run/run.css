@@ -91,6 +91,11 @@
   color: var(--ink, #1c1915);
 }
 
+.run__sentence--error {
+  color: #8b1e16;
+  font-weight: 650;
+}
+
 .run__error {
   color: #8b1e16;
   font-weight: 650;

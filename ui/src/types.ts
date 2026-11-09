@@ -13,14 +13,15 @@ export interface JsonObject {
 }
 
 export interface MeasurementBasin extends JsonObject {
-  name?: string;
-  water_km2?: number;
+  area_km2?: number;
+  median_sigma0_db?: number;
 }
 
 export interface MeasurementBridge extends JsonObject {
-  deck_length_m?: number;
-  deck_width_m?: number;
-  layover_line?: JsonValue;
+  area_m2?: number;
+  length_m?: number;
+  width_m?: number;
+  peak_sigma0_db?: number;
 }
 
 export interface MeasurementReturn extends JsonObject {

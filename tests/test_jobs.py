@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import http.client
 import importlib
+import importlib.util
 import json
 import sys
 import tempfile
@@ -13,7 +14,7 @@ from collections.abc import Callable
 from http.server import ThreadingHTTPServer
 from pathlib import Path
 from types import SimpleNamespace
-from typing import Any, TYPE_CHECKING, cast
+from typing import TYPE_CHECKING, Any, cast
 from unittest.mock import patch
 
 from lisbon_scene.jobs import MeasurementJobManager
@@ -29,25 +30,24 @@ def _stub_analyze_dependencies() -> None:
         sys.modules.setdefault("numpy", types.ModuleType("numpy"))
     if importlib.util.find_spec("tifffile") is None:
         tifffile = types.ModuleType("tifffile")
-        tifffile.TiffFile = object  # type: ignore[attr-defined]
+        setattr(tifffile, "TiffFile", object)
         sys.modules.setdefault("tifffile", tifffile)
     if importlib.util.find_spec("PIL") is None:
         pil = types.ModuleType("PIL")
-        pil.Image = types.ModuleType("PIL.Image")  # type: ignore[attr-defined]
-        pil.ImageDraw = types.ModuleType("PIL.ImageDraw")  # type: ignore[attr-defined]
-        pil.UnidentifiedImageError = OSError  # type: ignore[attr-defined]
+        pil_image = types.ModuleType("PIL.Image")
+        pil_image_draw = types.ModuleType("PIL.ImageDraw")
+        setattr(pil, "Image", pil_image)
+        setattr(pil, "ImageDraw", pil_image_draw)
+        setattr(pil, "UnidentifiedImageError", OSError)
         sys.modules.setdefault("PIL", pil)
-        sys.modules.setdefault("PIL.Image", pil.Image)  # type: ignore[attr-defined]
-        sys.modules.setdefault(
-            "PIL.ImageDraw", pil.ImageDraw  # type: ignore[attr-defined]
-        )
+        sys.modules.setdefault("PIL.Image", pil_image)
+        sys.modules.setdefault("PIL.ImageDraw", pil_image_draw)
     if importlib.util.find_spec("scipy") is None:
         scipy = types.ModuleType("scipy")
-        scipy.ndimage = types.ModuleType("scipy.ndimage")  # type: ignore[attr-defined]
+        scipy_ndimage = types.ModuleType("scipy.ndimage")
+        setattr(scipy, "ndimage", scipy_ndimage)
         sys.modules.setdefault("scipy", scipy)
-        sys.modules.setdefault(
-            "scipy.ndimage", scipy.ndimage  # type: ignore[attr-defined]
-        )
+        sys.modules.setdefault("scipy.ndimage", scipy_ndimage)
 
 
 _stub_analyze_dependencies()

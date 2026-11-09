@@ -1,4 +1,3 @@
-// If this branch lacks ui/package.json, the sibling package should provide Jest, ts-jest, @types/jest, and TypeScript.
 import type { Measurement } from "@/types";
 
 import { measurementToReturnRows } from "./rows";

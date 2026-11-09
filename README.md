@@ -10,14 +10,24 @@ Collected 24 October 2025, 13:53 UTC, by ICEYE-X52. Spotlight, X-band, VV. The f
 python3 -m venv .venv
 .venv/bin/pip install -r requirements.txt
 python3 scene.py
+pnpm --dir ui install
+pnpm --dir ui build
 .venv/bin/python app.py
 ```
 
-Open http://127.0.0.1:8765
+Open http://127.0.0.1:8765. The running command is
+`python3 app.py` or `.venv/bin/python app.py` on `127.0.0.1:8765`.
+If `ui/dist/index.html` is missing, run
+`pnpm --dir ui install && pnpm --dir ui build` before starting the Python
+server.
 
 `python3 scene.py` saves the STAC record, the thumbnail, the 4 MB quicklook, and the 16 MB dwell video. `python3 scene.py --all` also streams the GRD, the colorized sub-aperture image, the georeferenced dwell stack, and the SLC. `.venv/bin/python analyze.py` measures the GRD and the dwell stack and writes `intelligence/`.
 
-The page is one Python process. It reads `data/stac.json`, renders `data/qlk-cog.tif` to a PNG, and shows `scene_note.md`.
+The page is one Python process. It serves the built TypeScript page when
+`ui/dist/index.html` exists, otherwise it serves the original Python-rendered
+HTML. It reads `data/stac.json`, renders `data/qlk-cog.tif` to a PNG, and
+shows the scene metadata, the latest measurement, and the briefing files that
+are already on disk.
 
 ## What the page may claim
 
