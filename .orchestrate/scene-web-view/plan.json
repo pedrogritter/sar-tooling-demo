@@ -1,0 +1,185 @@
+{
+  "$schema": "/home/ubuntu/.cursor/plugins/cache/cursor-public/9333/6b0300214a09fd6029cfb7077043125758cd1fd2/skills/orchestrate/schemas/plan.schema.json",
+  "goal": "Execute the Scene web view plan in this repository.\n\nA TypeScript page served by the existing Python process. It shows the Lisbon quicklook and metadata, starts the measurement as one background job, and displays the current step sentence until the briefing and the numbers are on screen. RAG, LangChain, Ollama, Docker, and Kubernetes stay out of this cycle.\n\nThis iteration adds a local web view. Python keeps the scene, the job, and the measurement. TypeScript is the page only. The running command stays `python3 app.py` on `127.0.0.1:8765`.\n\nOut of this cycle, even if an agent has time left: RAG, LangChain, a local Ollama model, Docker, and Kubernetes.\n\nThe page has three regions. The preview is the quicklook and the STAC facts. The run region has one primary button, a spinner, a step count, and one sentence. The results region fills when a measurement exists: the numbers, the overview image, and the briefing. A limit line stays visible: a row is a bright return, and the page has not named a ship.\n\nOn load, GET /api/scene returns the last measurement and briefing if those files are already on disk, so the results region is filled before anyone presses the button. Pressing the button starts a new run and replaces them when the job finishes.\n\nUntil ui/dist/index.html exists, GET / keeps serving today's HTML from lisbon_scene/page.py. After the build exists, GET / serves that file. Hashed assets are cached. index.html is not.\n\nContract — all implementors use these shapes. The page displays sentence as written. It does not invent step text.\n\nGET /api/scene\n- scene_id, collected_at, start_at, end_at, platform, mode, band, polarizations, orbit_state, incidence_angle, bbox as [west, south, east, north]\n- preview_url: /quicklook.png when the quicklook loaded, otherwise null\n- measurement: the public object from intelligence/measurements.json, or null\n- briefing_html: HTML from lisbon_scene/markdown.py, or null\n- overview_url: /overview.png when that file exists, otherwise null\n\nPOST /api/jobs/measure with an empty body. 202 and { job_id, status: running }. 409 when a job is already running.\n\nGET /api/jobs/current\n- status: idle, running, done, or failed\n- step_index and step_count (9)\n- sentence: the active step, in this order\n  1. Checking that the GRD is on disk.\n  2. Checking that the dwell stack is on disk.\n  3. Checking the sub-aperture image.\n  4. Measuring dark water and the deck return.\n  5. Tracking bright returns across the dwell.\n  6. Comparing each return with its sub-aperture neighborhood.\n  7. Recording the SLC sidecar without detecting on it.\n  8. Drawing the overview.\n  9. Writing the measurement, the GeoJSON, and the briefing.\n- error: a short reason when failed, otherwise null\n- result: on done, the same measurement, briefing_html, and overview_url fields as the scene route; otherwise null\n\nA missing raster fails the job with a sentence that names the file and python3 scene.py --all. The button does not start that download. The SLC stays a sidecar note.\n\nThe page polls every 400 ms while running, then stops. A failed job leaves the previous result on screen and shows error beside the spinner.\n\nPage: Vite, React, and TypeScript under ui/, installed and built with pnpm. No component library, no router, no state library, no map. @/ maps to ui/src. One BEM stylesheet per region, no inline styles and no !important. The product path is the Python server. Do not use pnpm dev as the way to run the tool. pnpm --dir ui build writes ui/dist.\n\nVisual: keep the current paper page and dark radar image from static/scene.css. UI chrome in a system sans. The briefing stays in a serif. The spinner honors prefers-reduced-motion. The measure button is a real button with a visible focus ring, disabled while a job is running.\n\nPreview facts are the ones already on the page: collected time, window, platform, mode, band, polarization, orbit, incidence, bounding box. The image is /quicklook.png.\n\nResults show water area, the two basins, deck length and width with the layover line, each return's motion, area, speed, and peak sigma0, then the briefing HTML. The overview image sits with those numbers.\n\nBrowser errors keep posting to /client-error.\n\nFour chunks: (1) Python job API, (2) preview shell, (3) run and results, (4) join after 1-3.",
+  "summary": "Lisbon scene web view: Python job API plus a TypeScript page that previews the collect and runs one measurement",
+  "dispatcher": {
+    "firstName": "Pedro"
+  },
+  "rootSlug": "scene-web-view",
+  "baseBranch": "main",
+  "prBase": "main",
+  "repoUrl": "https://github.com/pedrogritter/sar-tooling-demo",
+  "selfAgentId": "bc-d9aeca72-36a7-4d82-a59d-a6db9c89b4fd",
+  "syncStateToGit": true,
+  "acceptanceCriteria": [
+    "python3 app.py still serves 127.0.0.1:8765",
+    "GET / serves lisbon_scene/page.py HTML until ui/dist/index.html exists, then serves that file",
+    "GET /api/scene, POST /api/jobs/measure, GET /api/jobs/current match the contract",
+    "One background job with nine step sentences; missing raster fails naming the file and python3 scene.py --all",
+    "TypeScript page shows preview, run (button, spinner, step sentence), and results (numbers, overview, briefing)",
+    "Limit line stays visible: a row is a bright return; the page has not named a ship",
+    "No RAG, LangChain, Ollama, Docker, or Kubernetes"
+  ],
+  "tasks": [
+    {
+      "name": "python-job-api",
+      "type": "worker",
+      "model": "gpt-5.5-high",
+      "scopedGoal": "Add the measurement job API to the existing Python process. Do not add TypeScript, Docker, RAG, LangChain, Ollama, or Kubernetes.\n\nDiscovered facts (this clone, main at 3dbd233):\n- Entry is app.py -> lisbon_scene.web.build_state/serve. ThreadingHTTPServer on 127.0.0.1:8765.\n- dispatch() in lisbon_scene/web.py handles GET /, /quicklook.png, /static/scene.css, /static/scene.js, POST /client-error. Unknown paths 404. It never serves the data directory.\n- AppState is a frozen dataclass: scene, note_markdown, quicklook, static_files. Keep that shape; add job state elsewhere (lisbon_scene/jobs.py), not by stuffing rasters into AppState.\n- make_handler currently: POST requires Content-Length and caps every POST at 2048 bytes (_MAX_CLIENT_ERROR_BYTES) before dispatch; _reply always sends Cache-Control: no-store. Empty POST /api/jobs/measure must succeed (Content-Length 0 or missing treated as empty). Keep /client-error cap and behavior. Vary cache: hashed ui/dist assets may be cached (public, immutable); index.html and JSON API must not be cached.\n- analyze.py:main() currently wait_for('grd-cog.tif'), wait_for('vid-cog.tif'), optional wait_for('csi-cog.tif'), then measure, overview, write_products, briefing. wait_for HEAD-requests the remote and can block for hours. That wait/download path must not run from the web job. The button does not start a download.\n- intelligence/measurements.json and intelligence/briefing.md are in git. intelligence/overview.png is gitignored. data/ is gitignored; cloud clones usually have no rasters and no STAC. tests/test_web.py, tests/test_page.py, tests/test_loader.py call load_scene()/build_state() and need data/stac.json plus qlk-cog.tif. Do not download products. Job tests must not open a raster and must not call scene.py.\n- lisbon_scene/markdown.py:render_markdown is the briefing HTML renderer. Reuse it for briefing_html.\n- SceneRecord fields (loader.py) map 1:1 onto the scene JSON: scene_id, collected_at, start_at, end_at, platform, mode, band, polarizations (list), orbit_state, incidence_angle, bbox as [west, south, east, north].\n- mypy is strict on app.py, lisbon_scene, tests (not analyze.py). New jobs.py and web.py changes must typecheck. pyproject ruff E,F,I,UP, line length 88.\n- python3 analyze.py must still run the same work via run_measurement.\n\nImplement:\n1. analyze.py: pull the body of main into run_measurement(on_step). on_step(index, sentence) is called at each of the nine steps below, in order, with 1-based index matching the list. python3 analyze.py still calls run_measurement (print/log the sentence if on_step is a default). Do not keep the 6-hour wait_for poll on the job path. Fail immediately when a required raster is missing.\n   Sentences, exact text:\n   1. Checking that the GRD is on disk.\n   2. Checking that the dwell stack is on disk.\n   3. Checking the sub-aperture image.\n   4. Measuring dark water and the deck return.\n   5. Tracking bright returns across the dwell.\n   6. Comparing each return with its sub-aperture neighborhood.\n   7. Recording the SLC sidecar without detecting on it.\n   8. Drawing the overview.\n   9. Writing the measurement, the GeoJSON, and the briefing.\n   Required rasters: data/grd-cog.tif (GRD) and data/vid-cog.tif (dwell stack). CSI (csi-cog.tif) is optional as today; still call on_step for sentence 3. SLC is a sidecar note only (slc_note); do not detect on it. A missing required raster fails with a short error sentence that names the file and includes `python3 scene.py --all`. Do not start that download.\n2. lisbon_scene/jobs.py: one background thread, one lock. POST starts run_measurement in that thread. Inject the runner so tests can pass a fake (do not import/open rasters in tests). Status idle | running | done | failed. step_count is 9. On done, result is {measurement, briefing_html, overview_url} with the same meaning as GET /api/scene. On failed, error is the short reason and result is null. Starting a job while status is running raises/returns 409. job_id is a new id per start.\n3. lisbon_scene/web.py routes:\n   - GET /api/scene: JSON contract. preview_url is /quicklook.png if quicklook loaded else null. measurement is the public object from intelligence/measurements.json if that file exists else null. briefing_html is render_markdown of intelligence/briefing.md if that file exists else null. overview_url is /overview.png if intelligence/overview.png exists else null. Do not serve overview from anywhere else.\n   - POST /api/jobs/measure, empty body: 202 {job_id, status: running}; 409 when a job is already running.\n   - GET /api/jobs/current: {status, step_index, step_count, sentence, error, result}. idle when never started. JSON content-type.\n   - GET /overview.png: intelligence/overview.png only; 404 if missing.\n   - GET /: if ui/dist/index.html exists, serve that file (do not cache). Else keep today's render_page HTML. Serve other files that exist under ui/dist (typical Vite /assets/<hash>.*) with hashed-asset caching. Refuse path traversal. Keep /client-error and /quicklook.png and /static/*.\n4. tests/test_jobs.py: drive a fake runner through running, done, failed, and the 409 case. Do not open a raster. Cover GET /api/scene shape (you may construct AppState / a temp briefing file; do not require data/stac.json if you can avoid it). Cover POST 202/409 and GET /api/jobs/current. Cover GET / serving fallback HTML when ui/dist is absent, and serving ui/dist/index.html when you create a temp file. Cover /overview.png only from intelligence/overview.png.\n\nDo not edit ui/, README.md, lisbon_scene/page.py, lisbon_scene/loader.py, or static/.",
+      "pathsAllowed": [
+        "analyze.py",
+        "lisbon_scene/web.py",
+        "lisbon_scene/jobs.py",
+        "tests/test_jobs.py"
+      ],
+      "pathsForbidden": [
+        "ui/**",
+        "README.md",
+        "lisbon_scene/page.py",
+        "lisbon_scene/loader.py",
+        "static/**"
+      ],
+      "acceptance": [
+        "run_measurement(on_step) exists; python3 analyze.py still runs the same work",
+        "on_step is called with the nine exact sentences in order",
+        "One background thread and one lock; POST /api/jobs/measure returns 202 or 409",
+        "GET /api/scene and GET /api/jobs/current match the contract",
+        "Missing required raster fails naming the file and python3 scene.py --all; no download starts",
+        "GET / serves ui/dist/index.html when that file exists, else today's page; hashed dist assets cached; index.html not",
+        "GET /overview.png comes from intelligence/overview.png only; /client-error and /quicklook.png remain",
+        "tests/test_jobs.py passes with a fake runner and does not open a raster"
+      ],
+      "verify": "## Setup\n- No rasters. Inject a fake runner. Do not run scene.py or analyze.py against real COGs.\n\n## Automated\n- python3 -m unittest tests.test_jobs\n- Cover running, done, failed, and 409.\n- Cover GET / fallback vs ui/dist/index.html if the test creates a temp dist file.\n\n## Manual\n- n/a\n\n## Gotchas\n- data/ is gitignored; existing tests/test_web.py may fail in this clone. Do not 'fix' that by downloading. Job tests must stand alone.\n- Do not add RAG/LangChain/Ollama/Docker/K8s."
+    },
+    {
+      "name": "preview-shell",
+      "type": "worker",
+      "model": "gpt-5.5-high-fast",
+      "scopedGoal": "Create the Vite/React/TypeScript package under ui/ so pnpm --dir ui build emits ui/dist. This is the page shell and preview region only. Do not create RunPanel or ResultsPanel. Do not touch Python.\n\nDiscovered facts:\n- There is no ui/ directory yet. One package.json only, under ui/. Use pnpm (never npm). Do not run pnpm dev; the product path is python3 app.py.\n- static/scene.css is the visual source: paper page (--paper #f3efe6, --ink #1c1915), dark radar figure (#111), UI chrome already uses \"Segoe UI\", system-ui, sans-serif for kicker/id/limit/facts; body is currently serif. Keep the paper page and dark radar image. UI chrome (header, facts, buttons, spinner, limit) in a system sans. The briefing (results, later) stays serif — set that up in the global stylesheet so ResultsPanel can inherit, even though you do not create ResultsPanel.\n- Today's page (lisbon_scene/page.py) shows: kicker, title '25 de Abril bridge', scene id, limit note, quicklook figure, collect facts (Collected, Window, Platform, Mode, Band, Polarization, Orbit, Incidence angle, Bounding box). Preview facts are those collect fields (not On disk / Not downloaded).\n- New limit line (visible, role=note): a row is a bright return, and the page has not named a ship. Do not say a vessel was detected.\n- Browser errors: static/scene.js posts {message, source} JSON to POST /client-error. Replicate that from the TS page (window error + unhandledrejection).\n- @/ must map to ui/src in vite.config.ts and tsconfig. types.ts and api.ts are the only copies of the API types. Sibling run-results will import from @/types and @/api; sibling join will merge. Do not create ui/src/run or ui/src/results files.\n- main.tsx must mount three regions and import RunPanel from @/run/RunPanel and ResultsPanel from @/results/ResultsPanel. Those modules will not exist on your branch. Do not stub them. Typecheck/build may fail until join; that is expected. Still make the rest of the package installable.\n- GET /api/scene and job types (the only copies):\n  SceneResponse: scene_id, collected_at, start_at, end_at, platform, mode, band, polarizations: string[], orbit_state, incidence_angle, bbox: [west, south, east, north], preview_url: string | null, measurement: Measurement | null, briefing_html: string | null, overview_url: string | null.\n  Measurement is the public object from intelligence/measurements.json (water_km2, scene_km2, basins[], bridge, returns[] with motion, displacement_m, speed_m_s, area_m2, peak_sigma0_db, etc.). Keep it typed structurally; do not invent ship fields.\n  MeasureJobAccepted: { job_id: string, status: 'running' }\n  JobSnapshot: { status: 'idle'|'running'|'done'|'failed', step_index: number, step_count: number, sentence: string, error: string | null, result: { measurement, briefing_html, overview_url } | null }\n  api.ts: fetchScene(), startMeasureJob(), fetchCurrentJob() against same-origin /api/scene, POST /api/jobs/measure (empty body), GET /api/jobs/current. Throw or return enough for the page to handle 409.\n- Preview region: render the scene contract including empty state when preview_url is null (mirror today's 'quicklook file is not on disk' idea, but driven by preview_url). Image src is /quicklook.png when preview_url is set. One BEM stylesheet for the preview region (e.g. ui/src/preview/preview.css). Global page chrome in ui/src/styles.css. No inline styles, no !important. No component library, no router, no state library, no map.\n- Add Jest as a devDependency (jest, ts-jest, @types/jest) plus a test script and jest config that will pick up ui/src/**/*.test.ts after join. Sibling run-results will add a fixture test and must not create a second package.json. Also add react, react-dom, typescript, vite, @vitejs/plugin-react, and types. pnpm --dir ui install must write ui/pnpm-lock.yaml.\n- Add ui/.gitignore for node_modules and dist (Python serves dist when a human/join builds it; do not commit node_modules).\n- Fetch scene on load and pass measurement/briefing_html/overview_url into ResultsPanel props, and pass job helpers into RunPanel, so join only needs to exist. Define the RunPanel/ResultsPanel prop types in types.ts if that keeps a single types module; otherwise keep props local to the import site in main.tsx without creating the panel files.\n\nDo not edit analyze.py, lisbon_scene/**, tests/**, README.md, or ui/src/run/**, ui/src/results/**.",
+      "pathsAllowed": [
+        "ui/package.json",
+        "ui/pnpm-lock.yaml",
+        "ui/tsconfig.json",
+        "ui/tsconfig.app.json",
+        "ui/tsconfig.node.json",
+        "ui/vite.config.ts",
+        "ui/index.html",
+        "ui/.gitignore",
+        "ui/jest.config.ts",
+        "ui/jest.config.js",
+        "ui/src/main.tsx",
+        "ui/src/types.ts",
+        "ui/src/api.ts",
+        "ui/src/preview/**",
+        "ui/src/styles.css",
+        "ui/src/vite-env.d.ts"
+      ],
+      "pathsForbidden": [
+        "ui/src/run/**",
+        "ui/src/results/**",
+        "analyze.py",
+        "lisbon_scene/**",
+        "tests/**",
+        "README.md",
+        "app.py"
+      ],
+      "acceptance": [
+        "ui/package.json + pnpm-lock exist; pnpm --dir ui install works",
+        "@/ maps to ui/src; types.ts and api.ts match the scene/job contract and are the only copies",
+        "main.tsx mounts preview, run, and results regions and imports RunPanel and ResultsPanel without creating those modules",
+        "Preview renders STAC facts and /quicklook.png, with an empty state when preview_url is null",
+        "One BEM stylesheet per region owned here; no inline styles; no !important; paper page + dark radar; chrome in system sans",
+        "Browser errors post to /client-error",
+        "Jest is a devDependency of this package; no second package.json",
+        "Does not create RunPanel, ResultsPanel, or any Python file"
+      ],
+      "verify": "## Setup\n- pnpm --dir ui install\n\n## Automated\n- Confirm ui/package.json, lockfile, vite.config.ts alias, types.ts, api.ts, preview module, main.tsx imports.\n- Typecheck/build may fail because RunPanel and ResultsPanel are sibling files; do not stub them.\n\n## Manual\n- n/a on this branch (join serves via Python).\n\n## Gotchas\n- Do not run pnpm dev as the product path.\n- Do not add a component library, router, state library, or map."
+    },
+    {
+      "name": "run-results",
+      "type": "worker",
+      "model": "gpt-5.5-high-fast",
+      "scopedGoal": "Implement only ui/src/run/** and ui/src/results/**. Do not add package.json, main.tsx, types.ts, api.ts, or a second package.\n\nSibling preview-shell owns types.ts and api.ts. Import SceneResponse, Measurement, JobSnapshot, and fetch helpers from @/types and @/api. Those files will not exist on your branch; still import them. Do not duplicate those types.\n\nRunPanel (@/run/RunPanel):\n- One real <button> that POSTs /api/jobs/measure (empty body) via the shared client.\n- Disabled while the current job status is running. Visible focus ring (in the run BEM stylesheet, not inline, not !important).\n- While running, poll GET /api/jobs/current every 400 ms, then stop when status is not running.\n- Show a spinner, `step_index` of `step_count`, and `sentence` exactly as returned. Do not invent step text.\n- Spinner honors prefers-reduced-motion (no spinning animation when reduced motion is requested).\n- On 409, treat as already running and poll current.\n- On failed: keep showing error beside the spinner; do not clear results (ResultsPanel owns previous measurement). error is the API field.\n- One BEM stylesheet for the run region (e.g. ui/src/run/run.css).\n\nResultsPanel (@/results/ResultsPanel):\n- Renders when a measurement exists (from GET /api/scene on load, or from job result when status is done). Empty/hidden when measurement is null.\n- Show water area, the two basins, deck length and width with the layover line (the width is the bright radar return, layover included, not the roadway — surface that limit with the deck numbers), each return's motion, area, speed, and peak sigma0, then briefing_html (HTML from the API; briefing stays serif via BEM, no dangerously inventing extra copy).\n- Overview image at overview_url (/overview.png) sits with those numbers; empty if overview_url is null.\n- A small pure function maps a measurement to the rows the panel draws (returns table). Cover that function with a Jest test that uses a fixture copied from intelligence/measurements.json (or a trimmed subset), not the network. Put the test next to the mapper, e.g. ui/src/results/rows.test.ts.\n- If ui/package.json is missing on your branch (it will be), write the test file and leave a comment at the top of the test naming the Jest/ts-jest devDependencies rather than creating a second package.json.\n- One BEM stylesheet for the results region. No inline styles, no !important.\n- Do not name a ship. A row is a bright return.\n\nExport RunPanel and ResultsPanel as the names main.tsx will import: `@/run/RunPanel` and `@/results/ResultsPanel`.\n\nDo not edit anything outside ui/src/run/** and ui/src/results/**.",
+      "pathsAllowed": [
+        "ui/src/run/**",
+        "ui/src/results/**"
+      ],
+      "pathsForbidden": [
+        "ui/package.json",
+        "ui/pnpm-lock.yaml",
+        "ui/src/main.tsx",
+        "ui/src/types.ts",
+        "ui/src/api.ts",
+        "ui/src/preview/**",
+        "ui/src/styles.css",
+        "analyze.py",
+        "lisbon_scene/**",
+        "tests/**",
+        "README.md",
+        "app.py"
+      ],
+      "acceptance": [
+        "RunPanel posts measure, polls /api/jobs/current every 400ms while running, shows spinner, step_index of step_count, and sentence",
+        "Measure button is a real button with a visible focus ring and is disabled while running",
+        "Spinner honors prefers-reduced-motion",
+        "Failed job shows error beside the spinner and does not require clearing previous results",
+        "ResultsPanel renders measurement numbers, overview image, and briefing_html",
+        "A pure mapper turns a measurement into rows; Jest test uses a fixture, not the network",
+        "No second package.json; no Python edits; types imported from @/types not copied"
+      ],
+      "verify": "## Setup\n- package.json lives on the sibling branch; you may not have Jest installed. Still write the test file.\n\n## Automated\n- The row mapper test is a real Jest test with a fixture.\n\n## Manual\n- n/a on this branch.\n\n## Gotchas\n- Display sentence as written. Do not invent step text.\n- Do not name a ship."
+    },
+    {
+      "name": "verify-python-job-api",
+      "type": "verifier",
+      "verifies": "python-job-api",
+      "scopedGoal": "Verify python-job-api against every acceptance criterion by running tests/test_jobs.py on that branch. Do not open rasters. Do not modify target source files.",
+      "acceptance": [
+        "Verification section includes execution evidence for all python-job-api acceptance criteria",
+        "tests.test_jobs was actually run and the output is quoted"
+      ]
+    },
+    {
+      "name": "join-scene-web",
+      "type": "worker",
+      "model": "gpt-5.5-high",
+      "openPR": true,
+      "dependsOn": [
+        "python-job-api",
+        "preview-shell",
+        "run-results",
+        "verify-python-job-api"
+      ],
+      "scopedGoal": "Merge the three implementation branches named in the python-job-api, preview-shell, and run-results handoffs into this branch (base is main). Do not merge the verifier branch.\n\nConflict policy by ownership:\n- analyze.py, lisbon_scene/web.py, lisbon_scene/jobs.py, tests/test_jobs.py → python-job-api\n- ui/package.json, lockfile, tsconfig*, vite.config.ts, ui/index.html, ui/src/main.tsx, ui/src/types.ts, ui/src/api.ts, ui/src/preview/**, ui/src/styles.css → preview-shell\n- ui/src/run/**, ui/src/results/** → run-results\nIf an import failed to meet (name mismatch, missing Jest, missing alias, RunPanel props disagree with types.ts), fix the import so the page typechecks. Prefer matching the shared contract in types.ts. Add Jest/ts-jest only if preview-shell did not declare them and the results test needs them. Do not add a second package.json.\n\nThen:\n1. Update the README Run section: the running command stays python3 app.py on 127.0.0.1:8765. Document pnpm --dir ui install && pnpm --dir ui build before that if ui/dist is missing. Do not document pnpm dev as the way to run the tool. Do not add RAG/LangChain/Ollama/Docker/K8s.\n2. Run: pnpm --dir ui install; pnpm --dir ui exec tsc --noEmit; pnpm --dir ui build; .venv/bin/python -m unittest discover -s tests (create .venv and pip install -r requirements-dev.txt if needed). If existing tests fail only because data/stac.json / qlk-cog.tif are absent, run python3 scene.py WITHOUT --all so the page has STAC + quicklook; never download the GRD/SLC. Re-run unittest. tests.test_jobs must pass regardless.\n3. One pass through the page on the Python server: python3 app.py (or .venv/bin/python app.py) on 127.0.0.1:8765. Confirm GET / is the TS page (ui/dist/index.html). Confirm quicklook and metadata. Start a measurement only if data/grd-cog.tif is already on disk. If the GRD is absent (likely), press measure, confirm the job fails with the missing-file sentence that names the file and python3 scene.py --all, and the page stays usable (preview still shown; previous briefing/measurement from disk still shown if those files exist). Confirm polling stops after the job is not running.\n4. Open a draft PR against main with the merged result.\n\nOut of cycle: do not add RAG, LangChain, Ollama, Docker, or Kubernetes even if you have time.",
+      "pathsAllowed": [
+        "README.md",
+        "ui/**",
+        "analyze.py",
+        "lisbon_scene/**",
+        "tests/**",
+        ".gitignore",
+        "app.py"
+      ],
+      "acceptance": [
+        "Three worker branches merged; both parents of each slice present in history as applicable",
+        "pnpm --dir ui exec tsc --noEmit passes",
+        "pnpm --dir ui build writes ui/dist/index.html",
+        "tests.test_jobs passes; unittest discover is run",
+        "README run section documents python3 app.py on 127.0.0.1:8765 and pnpm --dir ui build, not pnpm dev",
+        "One pass through http://127.0.0.1:8765: preview shows; measure either completes or fails with the missing-file sentence; page stays usable",
+        "Draft PR opened against main"
+      ],
+      "verify": "## Setup\n- Merge is already on this branch. Install ui deps and Python venv.\n- If data/stac.json is missing, python3 scene.py (never --all).\n\n## Automated\n- pnpm --dir ui exec tsc --noEmit\n- pnpm --dir ui build\n- .venv/bin/python -m unittest tests.test_jobs\n- Prefer unittest discover -s tests after STAC/quicklook exist.\n\n## Manual\n- Open http://127.0.0.1:8765 served by python3 app.py.\n- Confirm quicklook + metadata.\n- Press measure only if GRD is on disk; otherwise confirm missing-file failure sentence and usable page.\n\n## Gotchas\n- Do not download GRD/SLC. Do not use pnpm dev as the product path.\n- Hashed assets must load (Network 200). index.html must not be cached as a hashed asset."
+    },
+    {
+      "name": "verify-join-scene-web",
+      "type": "verifier",
+      "verifies": "join-scene-web",
+      "scopedGoal": "Verify the joined scene web view on the join-scene-web branch. Run install, tsc, build, Python job tests, and one pass through http://127.0.0.1:8765 on the Python server. If GRD is absent, confirm the missing-file job failure and that the page stays usable. Do not modify target source. Do not add Docker/K8s/Ollama.",
+      "acceptance": [
+        "Verification section includes execution evidence for all join-scene-web acceptance criteria",
+        "live page was opened on the Python server, not only typecheck"
+      ]
+    }
+  ]
+}
