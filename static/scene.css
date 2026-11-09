@@ -1,0 +1,189 @@
+/* Briefing page for one SAR collect. The image stays dark; the page stays light. */
+
+:root {
+  color-scheme: light;
+  --ink: #1c1915;
+  --muted: #5e584e;
+  --paper: #f3efe6;
+  --panel: #fffdf8;
+  --line: #ddd4c6;
+  --limit: #3c2e1e;
+  --limit-ink: #f6efe4;
+  --accent: #8a4b24;
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  background: var(--paper);
+  color: var(--ink);
+  font-family: Cambria, "Iowan Old Style", Palatino, Georgia, serif;
+  font-size: 1.05rem;
+  line-height: 1.5;
+}
+
+.scene {
+  width: min(72rem, calc(100% - 2rem));
+  margin: 0 auto;
+  padding: 2rem 0 4rem;
+}
+
+.scene__header {
+  margin-bottom: 1.25rem;
+}
+
+.scene__kicker {
+  margin: 0 0 0.35rem;
+  color: var(--accent);
+  font-family: "Segoe UI", system-ui, sans-serif;
+  font-size: 0.78rem;
+  font-weight: 650;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.scene__title {
+  margin: 0;
+  font-size: clamp(2rem, 4vw, 3.25rem);
+  font-weight: 600;
+  letter-spacing: -0.02em;
+  line-height: 1.05;
+}
+
+.scene__id {
+  margin: 0.6rem 0 0;
+  color: var(--muted);
+  font-family: "Segoe UI", system-ui, sans-serif;
+  font-size: 0.82rem;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+}
+
+.scene__limit {
+  margin: 0 0 1.5rem;
+  padding: 0.9rem 1rem;
+  background: var(--limit);
+  color: var(--limit-ink);
+  font-family: "Segoe UI", system-ui, sans-serif;
+  font-size: 0.95rem;
+  line-height: 1.45;
+}
+
+.scene__layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1.45fr) minmax(16rem, 0.7fr);
+  gap: 1.25rem;
+  align-items: start;
+}
+
+.scene__figure {
+  margin: 0;
+  background: #111;
+}
+
+.scene__image {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+
+.scene__missing {
+  margin: 0;
+  padding: 2rem 1rem;
+  color: #f3efe6;
+  font-family: "Segoe UI", system-ui, sans-serif;
+}
+
+.scene__caption {
+  padding: 0.75rem 0.2rem 0;
+  color: var(--muted);
+  background: var(--paper);
+  font-family: "Segoe UI", system-ui, sans-serif;
+  font-size: 0.85rem;
+}
+
+.scene__meta {
+  padding: 1rem 1rem 0.4rem;
+  background: var(--panel);
+  border: 1px solid var(--line);
+}
+
+.scene__heading {
+  margin: 0 0 0.75rem;
+  font-size: 1.15rem;
+}
+
+.scene__facts {
+  margin: 0;
+}
+
+.scene__fact {
+  display: grid;
+  gap: 0.15rem;
+  padding: 0.65rem 0;
+  border-top: 1px solid var(--line);
+}
+
+.scene__fact dt {
+  color: var(--muted);
+  font-family: "Segoe UI", system-ui, sans-serif;
+  font-size: 0.72rem;
+  font-weight: 650;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.scene__fact dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.scene__note {
+  max-width: 42rem;
+  margin-top: 2rem;
+}
+
+.scene__note h2 {
+  margin: 0 0 0.75rem;
+  font-size: 1.6rem;
+}
+
+.scene__note h3 {
+  margin: 1.6rem 0 0.4rem;
+  font-size: 1.15rem;
+}
+
+.scene__note p,
+.scene__note li {
+  font-size: 1.05rem;
+}
+
+.scene__note ul {
+  margin: 0.4rem 0 0;
+  padding-left: 1.2rem;
+}
+
+.scene__note li + li {
+  margin-top: 0.45rem;
+}
+
+.scene__note code {
+  font-family: "Segoe UI", system-ui, sans-serif;
+  font-size: 0.92em;
+}
+
+@media (max-width: 800px) {
+  .scene {
+    width: min(72rem, calc(100% - 1.25rem));
+    padding-top: 1.25rem;
+  }
+
+  .scene__layout {
+    grid-template-columns: 1fr;
+  }
+}
