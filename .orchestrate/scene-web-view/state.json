@@ -32,12 +32,12 @@
       "agentId": "bc-95c39100-96b1-47f8-9d53-efd76d2e5f60",
       "runId": "run-74a0649f-4258-4420-9fd4-c2f9b067d142",
       "parentAgentId": "bc-d9aeca72-36a7-4d82-a59d-a6db9c89b4fd",
-      "status": "running",
-      "resultStatus": null,
-      "handoffPath": null,
+      "status": "handed-off",
+      "resultStatus": "finished",
+      "handoffPath": "handoffs/preview-shell.md",
       "startedAt": "2026-11-09T16:52:48.558Z",
-      "finishedAt": null,
-      "lastUpdate": "2026-11-09T16:52:52.394Z",
+      "finishedAt": "2026-11-09T16:56:43.250Z",
+      "lastUpdate": "2026-11-09T16:56:43.251Z",
       "note": null,
       "slackTs": null,
       "prNumber": null,
@@ -59,12 +59,12 @@
       "handoffPath": "handoffs/run-results.md",
       "startedAt": "2026-11-09T16:52:52.933Z",
       "finishedAt": "2026-11-09T16:56:12.919Z",
-      "lastUpdate": "2026-11-09T16:56:12.919Z",
+      "lastUpdate": "2026-11-09T16:56:14.326Z",
       "note": null,
       "slackTs": null,
       "prNumber": null,
       "failureMode": null,
-      "verification": null,
+      "verification": "not-verified",
       "attempts": 1
     },
     {
@@ -140,5 +140,10 @@
       "verification": null
     }
   ],
-  "attention": []
+  "attention": [
+    {
+      "at": "2026-11-09T16:56:14.326Z",
+      "message": "run-results: verification self-reported (not-verified)"
+    }
+  ]
 }
