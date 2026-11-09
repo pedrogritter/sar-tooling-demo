@@ -16,3 +16,5 @@ __pycache__/
 
 # Personal handoff, not part of the demo
 HANDOFF.md
+
+.cursorignore
