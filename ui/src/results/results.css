@@ -1,0 +1,138 @@
+.results {
+  margin-top: 1.5rem;
+  padding: 1rem;
+  background: var(--panel, #fffdf8);
+  border: 1px solid var(--line, #ddd4c6);
+}
+
+.results__header {
+  margin-bottom: 1rem;
+}
+
+.results__kicker {
+  margin: 0 0 0.25rem;
+  color: var(--accent, #8a4b24);
+  font-family: "Segoe UI", system-ui, sans-serif;
+  font-size: 0.72rem;
+  font-weight: 650;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.results__heading {
+  margin: 0;
+  font-size: 1.45rem;
+  line-height: 1.2;
+}
+
+.results__layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(14rem, 0.7fr);
+  gap: 1rem;
+  align-items: start;
+}
+
+.results__numbers {
+  min-width: 0;
+}
+
+.results__summary {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.75rem;
+  margin: 0 0 1rem;
+}
+
+.results__summary-item {
+  padding: 0.75rem;
+  background: rgba(255, 255, 255, 0.5);
+  border: 1px solid var(--line, #ddd4c6);
+}
+
+.results__summary-item dt {
+  color: var(--muted, #5e584e);
+  font-family: "Segoe UI", system-ui, sans-serif;
+  font-size: 0.72rem;
+  font-weight: 650;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.results__summary-item dd {
+  margin: 0.25rem 0 0;
+}
+
+.results__muted {
+  color: var(--muted, #5e584e);
+  font-family: "Segoe UI", system-ui, sans-serif;
+  font-size: 0.88rem;
+}
+
+.results__table-wrap {
+  max-width: 100%;
+  overflow-x: auto;
+}
+
+.results__table {
+  width: 100%;
+  border-collapse: collapse;
+  font-family: "Segoe UI", system-ui, sans-serif;
+  font-size: 0.9rem;
+}
+
+.results__table caption {
+  margin-bottom: 0.5rem;
+  color: var(--muted, #5e584e);
+  font-weight: 650;
+  text-align: left;
+}
+
+.results__table th,
+.results__table td {
+  padding: 0.55rem 0.5rem;
+  border-top: 1px solid var(--line, #ddd4c6);
+  text-align: left;
+  vertical-align: top;
+}
+
+.results__table thead th {
+  color: var(--muted, #5e584e);
+  font-size: 0.72rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.results__overview {
+  margin: 0;
+  background: #111;
+}
+
+.results__overview img {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+
+.results__overview figcaption {
+  padding: 0.7rem;
+  color: #f3efe6;
+  font-family: "Segoe UI", system-ui, sans-serif;
+  font-size: 0.82rem;
+}
+
+.results__briefing {
+  max-width: 46rem;
+  margin-top: 1.25rem;
+  font-family: Cambria, "Iowan Old Style", Palatino, Georgia, serif;
+}
+
+.results__briefing > :first-child {
+  margin-top: 0;
+}
+
+@media (max-width: 800px) {
+  .results__layout,
+  .results__summary {
+    grid-template-columns: 1fr;
+  }
+}

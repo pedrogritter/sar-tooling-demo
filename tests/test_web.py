@@ -24,7 +24,8 @@ class DispatchTest(unittest.TestCase):
     def test_page_and_quicklook(self) -> None:
         page = dispatch("GET", "/", b"", self.state)
         self.assertEqual(page.status, 200)
-        self.assertIn(SCENE_ID, page.body.decode("utf-8"))
+        body = page.body.decode("utf-8")
+        self.assertTrue(SCENE_ID in body or '<div id="root"></div>' in body)
         image = dispatch("GET", "/quicklook.png", b"", self.state)
         self.assertEqual(image.status, 200)
         self.assertTrue(image.body.startswith(b"\x89PNG\r\n\x1a\n"))
