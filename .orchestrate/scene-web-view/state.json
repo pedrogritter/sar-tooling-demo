@@ -17,11 +17,11 @@
       "finishedAt": "2026-11-09T17:01:42.577Z",
       "lastUpdate": "2026-11-09T17:01:44.423Z",
       "note": null,
+      "attempts": 1,
       "slackTs": null,
       "prNumber": null,
       "failureMode": null,
-      "verification": "unit-test-verified",
-      "attempts": 1
+      "verification": "unit-test-verified"
     },
     {
       "name": "preview-shell",
@@ -39,11 +39,11 @@
       "finishedAt": "2026-11-09T16:56:43.250Z",
       "lastUpdate": "2026-11-09T16:56:44.716Z",
       "note": null,
+      "attempts": 1,
       "slackTs": null,
       "prNumber": null,
       "failureMode": null,
-      "verification": "not-verified",
-      "attempts": 1
+      "verification": "not-verified"
     },
     {
       "name": "run-results",
@@ -61,11 +61,11 @@
       "finishedAt": "2026-11-09T16:56:12.919Z",
       "lastUpdate": "2026-11-09T16:56:14.326Z",
       "note": null,
+      "attempts": 1,
       "slackTs": null,
       "prNumber": null,
       "failureMode": null,
-      "verification": "not-verified",
-      "attempts": 1
+      "verification": "not-verified"
     },
     {
       "name": "verify-python-job-api",
@@ -85,11 +85,11 @@
       "finishedAt": "2026-11-09T17:05:42.949Z",
       "lastUpdate": "2026-11-09T17:05:42.949Z",
       "note": null,
+      "attempts": 1,
       "slackTs": null,
       "prNumber": null,
       "failureMode": null,
-      "verification": null,
-      "attempts": 1
+      "verification": null
     },
     {
       "name": "join-scene-web",
@@ -112,16 +112,16 @@
       "finishedAt": "2026-11-09T17:46:56.136Z",
       "lastUpdate": "2026-11-09T17:46:57.494Z",
       "note": null,
+      "attempts": 1,
       "slackTs": null,
       "prNumber": 1,
       "failureMode": null,
-      "verification": "live-ui-verified",
-      "attempts": 1
+      "verification": "live-ui-verified"
     },
     {
       "name": "verify-join-scene-web",
       "type": "verifier",
-      "branch": "orch/scene-web-view/verify-join-scene-web",
+      "branch": "`orch/scene-web-view/join-scene-web` (no commits made — verification only; working tree clean, no target source modified)",
       "startingRef": "orch/scene-web-view/join-scene-web",
       "dependsOn": [
         "join-scene-web"
@@ -129,18 +129,18 @@
       "agentId": "bc-505170b7-6315-41da-855f-76560dbaa804",
       "runId": "run-161d5cf5-118a-4894-ba0f-5a064ebdcc46",
       "parentAgentId": "bc-d9aeca72-36a7-4d82-a59d-a6db9c89b4fd",
-      "status": "running",
-      "resultStatus": null,
-      "handoffPath": null,
+      "status": "handed-off",
+      "resultStatus": "finished",
+      "handoffPath": "handoffs/verify-join-scene-web.md",
       "startedAt": "2026-11-09T17:47:05.814Z",
-      "finishedAt": null,
-      "lastUpdate": "2026-11-09T17:47:10.417Z",
+      "finishedAt": "2026-11-09T18:02:43.718Z",
+      "lastUpdate": "2026-11-09T18:02:43.719Z",
       "note": null,
+      "attempts": 1,
       "slackTs": null,
-      "prNumber": null,
+      "prNumber": 1,
       "failureMode": null,
-      "verification": null,
-      "attempts": 1
+      "verification": null
     }
   ],
   "attention": [
