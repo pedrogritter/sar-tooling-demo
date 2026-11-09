@@ -10,12 +10,12 @@
       "agentId": "bc-48d866fa-a205-47df-84ce-88cd2e3a8165",
       "runId": "run-68b74776-3589-4271-bc8f-93d1d96a6b04",
       "parentAgentId": "bc-d9aeca72-36a7-4d82-a59d-a6db9c89b4fd",
-      "status": "running",
-      "resultStatus": null,
-      "handoffPath": null,
+      "status": "handed-off",
+      "resultStatus": "finished",
+      "handoffPath": "handoffs/python-job-api.md",
       "startedAt": "2026-11-09T16:52:43.907Z",
-      "finishedAt": null,
-      "lastUpdate": "2026-11-09T16:52:47.381Z",
+      "finishedAt": "2026-11-09T17:01:42.577Z",
+      "lastUpdate": "2026-11-09T17:01:42.577Z",
       "note": null,
       "slackTs": null,
       "prNumber": null,
@@ -37,12 +37,12 @@
       "handoffPath": "handoffs/preview-shell.md",
       "startedAt": "2026-11-09T16:52:48.558Z",
       "finishedAt": "2026-11-09T16:56:43.250Z",
-      "lastUpdate": "2026-11-09T16:56:43.251Z",
+      "lastUpdate": "2026-11-09T16:56:44.716Z",
       "note": null,
       "slackTs": null,
       "prNumber": null,
       "failureMode": null,
-      "verification": null,
+      "verification": "not-verified",
       "attempts": 1
     },
     {
@@ -144,6 +144,10 @@
     {
       "at": "2026-11-09T16:56:14.326Z",
       "message": "run-results: verification self-reported (not-verified)"
+    },
+    {
+      "at": "2026-11-09T16:56:44.716Z",
+      "message": "preview-shell: verification self-reported (not-verified)"
     }
   ]
 }
