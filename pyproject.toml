@@ -1,3 +1,16 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "iceye-scene"
+version = "0.1.0"
+description = "Local viewer and measurement tools for one ICEYE open-data scene."
+requires-python = ">=3.12"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
 [tool.ruff]
 target-version = "py312"
 line-length = 88
@@ -9,8 +22,11 @@ select = ["E", "F", "I", "UP"]
 [tool.mypy]
 python_version = "3.12"
 strict = true
-files = ["app.py", "lisbon_scene", "tests"]
-exclude = ["data"]
+files = ["src/scene", "tests"]
+mypy_path = "src"
+# analyze.py is the measurement script. It stayed outside strict checking
+# when it lived at the repository root.
+exclude = ["data", "src/scene/analyze\\.py"]
 
 [[tool.mypy.overrides]]
 module = "PIL.*"

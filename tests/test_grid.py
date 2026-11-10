@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import unittest
 
-from lisbon_scene.grid import Grid
+from scene.grid import Grid
 
 # proj:transform of the Lisbon GRD sidecar.
 GRD = (

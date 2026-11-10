@@ -2,31 +2,47 @@
 
 Public ICEYE scene `ICEYE_EYCKP5_20251024T135309Z_6724574_X52_SLF`, from the [ICEYE open data catalogue](https://www.iceye.com/open-data-initiative), licensed [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/). This repository does not include the radar files.
 
-Collected 24 October 2025, 13:53 UTC, by ICEYE-X52. Spotlight, X-band, VV. The footprint covers the 25 de Abril bridge.
+Collected 24 October 2025, 13:53 UTC, by ICEYE-X52. Spotlight, X-band, VV. The footprint covers the 25 de Abril bridge. The package name is `scene`. This checkout points `src/scene/fetch.py` at this collect, and `content/scene_note.md` is the note for it.
+
+## Layout
+
+| Path | Role |
+| --- | --- |
+| `src/scene/` | Python package: fetch the STAC assets, measure them, and serve the page |
+| `frontend/` | Vite and React page. `pnpm --dir frontend build` writes `frontend/dist` |
+| `content/scene_note.md` | Person-written note shown on the fallback page |
+| `data/` | Downloaded scenes in `data/scenes/<id>/`, plus the catalog index. Gitignored |
+| `intelligence/` | Measurement outputs. `overview.png` is gitignored |
+| `tests/` | Python tests |
 
 ## Run
 
 ```bash
 python3 -m venv .venv
 .venv/bin/pip install -r requirements.txt
-python3 scene.py
-pnpm --dir ui install
-pnpm --dir ui build
-.venv/bin/python app.py
+.venv/bin/pip install -e .
+python -m scene.fetch
+pnpm --dir frontend install
+pnpm --dir frontend build
+python -m scene.serve
 ```
 
-Open http://127.0.0.1:8765. `SCENE_HOST` and `SCENE_PORT` change that address. The product command is `.venv/bin/python app.py`. `pnpm --dir ui build` writes `ui/dist`, and the Python process serves that page.
+Open http://127.0.0.1:8765. `SCENE_HOST` and `SCENE_PORT` change that address. The product command is `python -m scene.serve`. `pnpm --dir frontend build` writes `frontend/dist`, and the Python process serves that page.
 
-`python3 scene.py` saves the STAC record, the thumbnail, the quicklook, and the dwell video. `python3 scene.py --all` also streams the GRD (about 484 MB), the colorized sub-aperture image (about 1.2 GB), the georeferenced dwell stack (about 827 MB), and the SLC (about 11 GB).
+The page is one workspace. The center shows the selected scene. Catalog, library, and scene facts open from the left edge. Stage source, measure, and results open from the right. A download lists each file and its byte count along the bottom. Click the same tool, Close, or Escape to shut a panel.
 
-When `ui/dist/index.html` is missing, `GET /` serves the original Python page: the quicklook, the STAC fields, and the person-written `scene_note.md`. When the build exists, the page shows the quicklook and the STAC facts, and it fills the results from `intelligence/` if a measurement is already on disk.
+`python -m scene.fetch` saves the Lisbon test scene under `data/scenes/<id>/`: the STAC record, the thumbnail, the quicklook, and the dwell video. `python -m scene.fetch --all` also streams the GRD (about 484 MB), the colorized sub-aperture image (about 1.2 GB), the georeferenced dwell stack (about 827 MB), and the SLC (about 11 GB). The catalogue URL for that test scene lives in `src/scene/fetch.py`. A flat `data/stac.json` checkout is moved into the scene folder on startup, so files already on disk are not fetched again.
 
-The measure button starts one background job. The page shows that job's step sentence until it finishes, then replaces the numbers, the overview, and the briefing. A second click while a job is running is refused. If `data/grd-cog.tif` or `data/vid-cog.tif` is missing, the job fails and names `python3 scene.py --all`. The button does not download those files.
+The catalog tool searches the [ICEYE open data collection](https://iceye-open-data-catalog.s3.amazonaws.com/collections/iceye-sar.json). That bucket is a static STAC catalog, [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/), with no account. The commercial [ICAS catalog](https://docs.iceye.com/constellation/api/catalog/) is not called: it needs client credentials, and a download there is a purchase. The first search reads the collection link list. Item JSON (footprint, mode, thumbnail) fills in behind that list and is cached in `data/catalog-index.json` for 24 hours. The default download is the preview pack: thumbnail, quicklook, quicklook metadata, and the dwell video when the item has it, plus the STAC record. Large products stay unchecked until someone selects them. One download runs at a time.
+
+When `frontend/dist/index.html` is missing, `GET /` serves the original Python page: the quicklook, the STAC fields, and the person-written `content/scene_note.md`. When the build exists, choosing the Lisbon scene shows its quicklook, and the results panel fills from `intelligence/` if a measurement is already on disk.
+
+The measure control runs only for `ICEYE_EYCKP5_20251024T135309Z_6724574_X52_SLF`. The page shows that job's step sentence until it finishes, then puts the overview on the stage and the numbers in the results panel. A second click while a job is running is refused. If the GRD or the dwell stack is missing from that scene folder, the job fails and names `python -m scene.fetch --all`. The button does not download those files. Other downloaded scenes can be previewed. They are not measured.
 
 The same measurement from the shell:
 
 ```bash
-.venv/bin/python analyze.py
+python -m scene.analyze
 ```
 
 That requires the GRD and the dwell stack on disk. It writes:
@@ -42,15 +58,15 @@ That requires the GRD and the dwell stack on disk. It writes:
 
 ## What the page may claim
 
-The quicklook, the STAC fields printed beside it, the measurement numbers, the overview, and the briefing. A row is a bright return, and the page has not named a ship. The fallback Python page also shows `scene_note.md`, which a person wrote.
+The quicklook, the STAC fields printed beside it, the measurement numbers, the overview, and the briefing. A row is a bright return, and the page has not named a ship. The fallback Python page also shows `content/scene_note.md`, which a person wrote.
 
 ## What this repository does not do
 
 - No named vessel, no AIS, and no fusion with another sensor. A square in `intelligence/overview.png` is a bright radar return.
-- No claim that a model read the radar. `analyze.py` calls a model only when `OPENAI_API_KEY` is set, and the prompt may only phrase `measurements.json`.
-- No second scene, no change detection, and no map library. The quicklook stays in the product's own pixel orientation.
+- No claim that a model read the radar. `python -m scene.analyze` calls a model only when `OPENAI_API_KEY` is set, and the prompt may only phrase `measurements.json`.
+- More than one open-data scene can be stored under `data/scenes/`. The bridge measurement runs only on the Lisbon test scene. No change detection and no map library. The quicklook stays in the product's own pixel orientation. No ICAS purchase.
 - Python here is this reader, this job, and this page. It is not a large service other people depend on.
-- No Kubernetes. No air-gapped or classified deploy. Files already on disk and a local process are an offline view of this one scene, nothing more.
+- No Kubernetes. No air-gapped or classified deploy. Files already on disk and a local process are an offline view of the scenes downloaded here, nothing more.
 - No LangChain and no LangGraph. A later answer, if the page is right, has to work in plain Python over the STAC fields and the note before any framework wraps it.
 - No defense customer and no live track match. The scene is ICEYE open data.
 - GIS employment is not represented here. The note is a personal reading of one open scene.
@@ -63,9 +79,10 @@ Development checks need ruff and mypy:
 
 ```bash
 .venv/bin/pip install -r requirements-dev.txt
+.venv/bin/pip install -e .
 .venv/bin/python -m unittest discover -s tests
 .venv/bin/ruff check .
 .venv/bin/mypy
-pnpm --dir ui typecheck
-pnpm --dir ui test
+pnpm --dir frontend typecheck
+pnpm --dir frontend test
 ```

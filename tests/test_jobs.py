@@ -17,12 +17,12 @@ from types import SimpleNamespace
 from typing import TYPE_CHECKING, Any, cast
 from unittest.mock import patch
 
-from lisbon_scene.jobs import MeasurementJobManager
-from lisbon_scene.loader import Asset, BoundingBox, SceneRecord
-from lisbon_scene.web import AppState, HttpResponse, dispatch, make_handler
+from scene.jobs import MeasurementJobManager
+from scene.loader import Asset, BoundingBox, SceneRecord
+from scene.web import AppState, HttpResponse, dispatch, make_handler
 
 if TYPE_CHECKING:
-    from lisbon_scene.quicklook import QuicklookImage
+    from scene.quicklook import QuicklookImage
 
 
 def _stub_analyze_dependencies() -> None:
@@ -51,7 +51,7 @@ def _stub_analyze_dependencies() -> None:
 
 
 _stub_analyze_dependencies()
-analyze: Any = importlib.import_module("analyze")
+analyze: Any = importlib.import_module("scene.analyze")
 
 
 EXPECTED_STEPS = (
@@ -198,7 +198,7 @@ class RunMeasurementTest(unittest.TestCase):
             steps: list[tuple[int, str]] = []
             with patch.object(analyze, "DATA", data):
                 with self.assertRaisesRegex(
-                    RuntimeError, r"data/grd-cog\.tif.*python3 scene\.py --all"
+                    RuntimeError, r"data/grd-cog\.tif.*python -m scene\.fetch --all"
                 ):
                     analyze.run_measurement(
                         lambda index, sentence: steps.append((index, sentence))
@@ -261,7 +261,9 @@ class JobManagerTest(unittest.TestCase):
     def test_job_failure_keeps_error_as_sentence(self) -> None:
         def runner(on_step: Callable[[int, str], None]) -> None:
             on_step(1, EXPECTED_STEPS[0])
-            raise RuntimeError("Missing data/vid-cog.tif. Run python3 scene.py --all.")
+            raise RuntimeError(
+                "Missing data/vid-cog.tif. Run python -m scene.fetch --all."
+            )
 
         manager = MeasurementJobManager(runner=runner, output_dir=Path("unused"))
         job_id = manager.start()
@@ -269,7 +271,7 @@ class JobManagerTest(unittest.TestCase):
         failed = wait_for_status(manager, "failed")
         self.assertEqual(failed["status"], "failed")
         self.assertIn("data/vid-cog.tif", cast(str, failed["sentence"]))
-        self.assertIn("python3 scene.py --all", cast(str, failed["error"]))
+        self.assertIn("python -m scene.fetch --all", cast(str, failed["error"]))
         self.assertIsNone(failed["result"])
 
 
@@ -318,12 +320,12 @@ class WebApiTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             manager = MeasurementJobManager(runner=lambda _on_step: None)
-            with patch("lisbon_scene.web.project_root", return_value=root):
+            with patch("scene.web.project_root", return_value=root):
                 fallback = dispatch("GET", "/", b"", state, manager)
                 self.assertEqual(fallback.status, 200)
                 self.assertIn("Current paper page", fallback.body.decode("utf-8"))
 
-                dist = root / "ui" / "dist"
+                dist = root / "frontend" / "dist"
                 dist.mkdir(parents=True)
                 (dist / "index.html").write_text("<main>React shell</main>")
                 index = dispatch("GET", "/", b"", state, manager)
@@ -335,14 +337,14 @@ class WebApiTest(unittest.TestCase):
         state = make_state()
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
-            asset = root / "ui" / "dist" / "assets" / "index-abcd1234.js"
+            asset = root / "frontend" / "dist" / "assets" / "index-abcd1234.js"
             asset.parent.mkdir(parents=True)
             asset.write_text("console.log('ok');", encoding="utf-8")
-            (root / "ui" / "dist" / "secret.txt").write_text(
+            (root / "frontend" / "dist" / "secret.txt").write_text(
                 "secret", encoding="utf-8"
             )
             manager = MeasurementJobManager(runner=lambda _on_step: None)
-            with patch("lisbon_scene.web.project_root", return_value=root):
+            with patch("scene.web.project_root", return_value=root):
                 response = dispatch(
                     "GET", "/assets/index-abcd1234.js", b"", state, manager
                 )

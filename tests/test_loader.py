@@ -7,7 +7,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from lisbon_scene.loader import SceneDataError, load_scene
+from scene.loader import SceneDataError, load_scene
 
 SCENE_ID = "ICEYE_EYCKP5_20251024T135309Z_6724574_X52_SLF"
 
@@ -36,7 +36,13 @@ class RealSceneTest(unittest.TestCase):
         self.assertIsNotNone(slc)
         assert slc is not None
         self.assertTrue(slc.href.startswith("https://"))
-        slc_file = Path(__file__).resolve().parents[1] / "data" / "slc-cog.tif"
+        slc_file = (
+            Path(__file__).resolve().parents[1]
+            / "data"
+            / "scenes"
+            / SCENE_ID
+            / "slc-cog.tif"
+        )
         if slc_file.is_file():
             self.assertEqual(slc.local_path, slc_file)
         else:
@@ -66,7 +72,7 @@ class FixtureSceneTest(unittest.TestCase):
     def test_missing_file_names_scene_py(self) -> None:
         with self.assertRaises(SceneDataError) as caught:
             load_scene(Path("/tmp/does-not-exist-lisbon-stac.json"))
-        self.assertIn("python3 scene.py", str(caught.exception))
+        self.assertIn("python -m scene.fetch", str(caught.exception))
 
     def test_bad_bbox_fails(self) -> None:
         with tempfile.TemporaryDirectory() as raw:

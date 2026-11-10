@@ -1,4 +1,4 @@
-# Radar products downloaded by scene.py. They stay on this machine.
+# Radar products downloaded by python -m scene.fetch. They stay on this machine.
 data/
 
 # Rendered radar overview. The small measurement files stay with the code.
@@ -10,9 +10,11 @@ intelligence/overview.png
 
 # Local Python tooling
 __pycache__/
+*.pyc
 .venv/
 .mypy_cache/
 .ruff_cache/
+*.egg-info/
 
 # Personal handoff, not part of the demo
 HANDOFF.md

@@ -5,9 +5,9 @@ from __future__ import annotations
 import unittest
 from pathlib import Path
 
-from lisbon_scene.loader import load_scene
-from lisbon_scene.markdown import render_markdown
-from lisbon_scene.page import render_page
+from scene.loader import load_scene
+from scene.markdown import render_markdown
+from scene.page import render_page
 
 SCENE_ID = "ICEYE_EYCKP5_20251024T135309Z_6724574_X52_SLF"
 
@@ -36,7 +36,7 @@ class MarkdownTest(unittest.TestCase):
 class PageTest(unittest.TestCase):
     def test_real_scene_page_names_the_limit(self) -> None:
         scene = load_scene()
-        note_path = Path(__file__).resolve().parent.parent / "scene_note.md"
+        note_path = Path(__file__).resolve().parent.parent / "content" / "scene_note.md"
         note = note_path.read_text(encoding="utf-8")
         html = render_page(scene, note, quicklook_width=1600, quicklook_height=1600)
         self.assertIn("25 de Abril", html)
