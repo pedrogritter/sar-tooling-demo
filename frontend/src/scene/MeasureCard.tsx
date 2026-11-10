@@ -13,6 +13,8 @@ interface MeasureCardProps {
   onMeasure: () => void
   showHeading?: boolean
   disabled?: boolean
+  actionLabel?: string
+  runningLabel?: string
 }
 
 export function MeasureCard({
@@ -22,6 +24,8 @@ export function MeasureCard({
   onMeasure,
   showHeading = true,
   disabled = false,
+  actionLabel = "Measure scene",
+  runningLabel = "Measuring",
 }: MeasureCardProps) {
   const stepIndex = snapshot?.step_index ?? 0
   const stepCount = snapshot?.step_count || 9
@@ -56,7 +60,7 @@ export function MeasureCard({
           ) : (
             <Play />
           )}
-          {isRunning ? "Measuring" : "Measure scene"}
+          {isRunning ? runningLabel : actionLabel}
         </Button>
 
         <div className="flex flex-col gap-2" role="status" aria-live="polite">

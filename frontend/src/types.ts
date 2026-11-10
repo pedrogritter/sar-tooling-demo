@@ -39,6 +39,9 @@ export interface Measurement extends JsonObject {
   basins?: MeasurementBasin[]
   bridge?: MeasurementBridge
   returns?: MeasurementReturn[]
+  summary?: { label?: string; value?: string }[]
+  limit?: string
+  tool_id?: string
 }
 
 export interface SceneResponse {
@@ -158,4 +161,20 @@ export interface DownloadSnapshot {
 export interface DownloadAccepted {
   job_id: string
   status: "running"
+}
+
+export interface AnalysisTool {
+  id: string
+  label: string
+  category: string
+  description: string
+  locked: boolean
+  reason: string
+  needs_partner: boolean
+  partners: string[]
+  overview_url: string | null
+}
+
+export interface AnalysisToolsResponse {
+  tools: AnalysisTool[]
 }

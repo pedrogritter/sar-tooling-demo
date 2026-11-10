@@ -1,4 +1,5 @@
 import type {
+  AnalysisToolsResponse,
   CatalogItemDetail,
   CatalogSearchResponse,
   DownloadAccepted,
@@ -53,6 +54,38 @@ export async function startMeasureJob(): Promise<MeasureJobAccepted> {
 
 export async function fetchCurrentJob(): Promise<JobSnapshot> {
   return requestJson<JobSnapshot>("/api/jobs/current")
+}
+
+export async function fetchAnalysisTools(
+  sceneId: string
+): Promise<AnalysisToolsResponse> {
+  return requestJson<AnalysisToolsResponse>(
+    `/api/scenes/${encodeURIComponent(sceneId)}/tools`
+  )
+}
+
+export async function startAnalysisJob(
+  sceneId: string,
+  toolId: string,
+  partnerId: string | null
+): Promise<MeasureJobAccepted> {
+  try {
+    return await requestJson<MeasureJobAccepted>("/api/jobs/run", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        scene_id: sceneId,
+        tool_id: toolId,
+        partner_id: partnerId,
+      }),
+    })
+  } catch (error) {
+    if (error instanceof ApiError && error.status === 409) {
+      throw new MeasureJobConflictError()
+    }
+
+    throw error
+  }
 }
 
 export async function fetchSceneById(sceneId: string): Promise<SceneResponse> {

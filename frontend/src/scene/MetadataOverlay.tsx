@@ -11,12 +11,14 @@ interface MetadataOverlayProps {
   scene: SceneResponse | null
   loading: boolean
   error: string | null
+  onHide: () => void
 }
 
 export function MetadataOverlay({
   scene,
   loading,
   error,
+  onHide,
 }: MetadataOverlayProps) {
   const [expanded, setExpanded] = useState(false)
   const facts = scene ? collectFacts(scene) : []
@@ -26,7 +28,18 @@ export function MetadataOverlay({
 
   return (
     <aside className="absolute top-3 right-3 z-10 flex max-h-[min(24rem,70%)] w-60 flex-col gap-2 overflow-y-auto rounded-lg border bg-background/95 p-3 shadow-md backdrop-blur-sm">
-      <h2 className="text-sm font-medium">Metadata</h2>
+      <div className="flex items-center justify-between gap-2">
+        <h2 className="text-sm font-medium">Metadata</h2>
+        <Button
+          type="button"
+          variant="ghost"
+          size="xs"
+          className="px-1"
+          onClick={onHide}
+        >
+          Hide
+        </Button>
+      </div>
 
       {loading ? (
         <p className="text-xs text-muted-foreground">Loading scene metadata.</p>
