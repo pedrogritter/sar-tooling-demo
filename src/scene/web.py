@@ -18,6 +18,8 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 from urllib.parse import parse_qs, unquote, urlsplit
 
+from .belt.catalog import analysis_dir, tools_for_scene
+from .belt.run import step_sentences
 from .catalog import (
     PREVIEW_KEYS,
     CatalogError,
@@ -61,6 +63,11 @@ _SCENE_ROUTE = re.compile(
 _ITEM_ROUTE = re.compile(
     r"^/api/catalog/items/(?P<scene_id>[A-Za-z0-9_-]+)(?:/(?P<leaf>thumbnail))?$"
 )
+_ANALYSIS_ROUTE = re.compile(
+    r"^/api/scenes/(?P<scene_id>[A-Za-z0-9_-]+)/analysis/(?P<tool>[a-z0-9-]+)"
+    r"(?:/(?P<partner>[A-Za-z0-9_-]+))?/overview\.png$"
+)
+_TOOLS_ROUTE = re.compile(r"^/api/scenes/(?P<scene_id>[A-Za-z0-9_-]+)/tools$")
 _QUICKLOOK_CACHE: dict[str, tuple[int, bytes]] = {}
 
 
@@ -313,6 +320,18 @@ def _dispatch_workspace(
     path = urlsplit(target).path
     if path == "/api/library" and method == "GET":
         return _json(200, {"scenes": list_library()})
+    if path == "/api/jobs/run" and method == "POST":
+        return _start_analysis(body, manager)
+    tools_match = _TOOLS_ROUTE.fullmatch(path)
+    if tools_match is not None and method == "GET":
+        return _scene_tools(tools_match.group("scene_id"))
+    analysis_match = _ANALYSIS_ROUTE.fullmatch(path)
+    if analysis_match is not None and method == "GET":
+        return _analysis_png(
+            analysis_match.group("scene_id"),
+            analysis_match.group("tool"),
+            analysis_match.group("partner"),
+        )
     if path == "/api/downloads/current" and method == "GET":
         return _json(200, _downloads(downloads).current())
     if path == "/api/downloads" and method == "POST":
@@ -334,6 +353,86 @@ def _dispatch_workspace(
             scene_match.group("scene_id"), scene_match.group("leaf"), manager
         )
     return None
+
+
+def _scene_tools(scene_id: str) -> HttpResponse:
+    if (
+        not valid_scene_id(scene_id)
+        or not (scene_dir(scene_id) / "stac.json").is_file()
+    ):
+        return _plain(404, "Scene is not on disk")
+    try:
+        tools = [item.to_public() for item in tools_for_scene(scene_id)]
+    except SceneDataError as exc:
+        return _plain(404, str(exc))
+    return _json(200, {"tools": tools})
+
+
+def _analysis_png(scene_id: str, tool_id: str, partner_id: str | None) -> HttpResponse:
+    if not valid_scene_id(scene_id):
+        return _plain(404, "Not found")
+    if partner_id is not None and not valid_scene_id(partner_id):
+        return _plain(404, "Not found")
+    path = analysis_dir(scene_id, tool_id, partner_id) / "overview.png"
+    if not path.is_file() or not _inside_scene(scene_id, path):
+        return _plain(404, "Overview is not on disk")
+    return _file_response(path, "image/png")
+
+
+def _start_analysis(body: bytes, manager: MeasurementJobManager) -> HttpResponse:
+    if not body:
+        return _plain(400, "Analysis body must name a scene_id and a tool_id")
+    try:
+        payload = json.loads(body.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError):
+        return _plain(400, "Analysis body must be JSON")
+    if not isinstance(payload, dict):
+        return _plain(400, "Analysis body must be a JSON object")
+    scene_id = payload.get("scene_id")
+    tool_id = payload.get("tool_id")
+    partner_id = payload.get("partner_id")
+    if not isinstance(scene_id, str) or not valid_scene_id(scene_id):
+        return _plain(400, "scene_id must be a scene id")
+    if not isinstance(tool_id, str) or not tool_id:
+        return _plain(400, "tool_id must be a string")
+    if partner_id is not None and (
+        not isinstance(partner_id, str) or not valid_scene_id(partner_id)
+    ):
+        return _plain(400, "partner_id must be a scene id")
+    try:
+        views = {item.id: item for item in tools_for_scene(scene_id)}
+    except SceneDataError as exc:
+        return _plain(404, str(exc))
+    except KeyError:
+        return _plain(400, "Unknown tool")
+    view = views.get(tool_id)
+    if view is None:
+        return _plain(400, "Unknown tool")
+    if view.locked:
+        return _plain(400, view.reason)
+    chosen = partner_id if isinstance(partner_id, str) else None
+    if view.needs_partner and (chosen is None or chosen not in view.partners):
+        return _plain(400, "Choose a second scene with the same look.")
+    folder = analysis_dir(scene_id, tool_id, chosen if view.needs_partner else None)
+    if view.needs_partner and chosen is not None:
+        overview = f"/api/scenes/{scene_id}/analysis/{tool_id}/{chosen}/overview.png"
+    else:
+        overview = f"/api/scenes/{scene_id}/analysis/{tool_id}/overview.png"
+        chosen = None
+    try:
+        job_id = manager.start_analysis(
+            scene_id,
+            tool_id,
+            chosen,
+            folder,
+            overview,
+            len(step_sentences(tool_id)),
+        )
+    except JobAlreadyRunningError:
+        return _json(409, {"status": "running"})
+    except KeyError:
+        return _plain(400, "Unknown tool")
+    return _json(202, {"job_id": job_id, "status": "running"})
 
 
 def _catalog(catalog: CatalogService | None) -> CatalogService:

@@ -77,8 +77,41 @@ class MeasurementJobManager:
         self._sentence = ""
         self._error: str | None = None
         self._result: JobResult | None = None
+        self._result_dir: Path | None = None
+        self._overview_url = "/overview.png"
+        self._step_count = STEP_COUNT
+        self._active_runner: MeasurementRunner = self._runner
 
     def start(self) -> str:
+        return self._begin(self._runner, self.output_dir, "/overview.png", STEP_COUNT)
+
+    def start_analysis(
+        self,
+        scene_id: str,
+        tool_id: str,
+        partner_id: str | None,
+        output_dir: Path,
+        overview_url: str,
+        step_count: int,
+    ) -> str:
+        """Run one belt tool. The Lisbon measurement keeps ``start``."""
+
+        def runner(on_step: OnStep) -> None:
+            module = importlib.import_module("scene.belt.run")
+            run_tool = getattr(module, "run_tool")
+            if not callable(run_tool):
+                raise RuntimeError("scene.belt.run.run_tool is not callable")
+            run_tool(scene_id, tool_id, on_step, partner_id)
+
+        return self._begin(runner, output_dir, overview_url, step_count)
+
+    def _begin(
+        self,
+        runner: MeasurementRunner,
+        result_dir: Path,
+        overview_url: str,
+        step_count: int,
+    ) -> str:
         with self._lock:
             if self._status == "running":
                 raise JobAlreadyRunningError("A measurement job is already running")
@@ -89,6 +122,10 @@ class MeasurementJobManager:
             self._sentence = ""
             self._error = None
             self._result = None
+            self._result_dir = result_dir
+            self._overview_url = overview_url
+            self._step_count = step_count
+            self._active_runner = runner
             thread = threading.Thread(
                 target=self._run,
                 args=(job_id,),
@@ -105,7 +142,7 @@ class MeasurementJobManager:
                 status=self._status,
                 job_id=self._job_id,
                 step_index=self._step_index,
-                step_count=STEP_COUNT,
+                step_count=self._step_count,
                 sentence=self._sentence,
                 error=self._error,
                 result=self._result,
@@ -123,7 +160,7 @@ class MeasurementJobManager:
                 self._sentence = sentence
 
         try:
-            self._runner(on_step)
+            self._active_runner(on_step)
         except Exception as exc:  # noqa: BLE001 - all failures become job status.
             reason = _short_reason(exc)
             with self._lock:
@@ -134,7 +171,9 @@ class MeasurementJobManager:
                 self._error = reason
                 self._result = None
             return
-        result = read_job_result(self.output_dir)
+        result = read_job_result(
+            self._result_dir or self.output_dir, self._overview_url
+        )
         with self._lock:
             if self._job_id != job_id:
                 return
@@ -147,14 +186,15 @@ def default_output_dir() -> Path:
     return intelligence_dir()
 
 
-def read_job_result(output_dir: Path | None = None) -> JobResult:
+def read_job_result(
+    output_dir: Path | None = None, overview_url: str = "/overview.png"
+) -> JobResult:
     directory = output_dir or default_output_dir()
+    ready = (directory / "overview.png").is_file()
     return JobResult(
         measurement=_read_measurement(directory / "measurements.json"),
         briefing_html=_read_briefing(directory / "briefing.md"),
-        overview_url=(
-            "/overview.png" if (directory / "overview.png").is_file() else None
-        ),
+        overview_url=overview_url if ready else None,
     )
 
 
