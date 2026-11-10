@@ -31,3 +31,7 @@ exclude = ["data", "src/scene/analyze\\.py"]
 [[tool.mypy.overrides]]
 module = "PIL.*"
 ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+module = "scipy.*"
+ignore_missing_imports = true
