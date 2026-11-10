@@ -17,32 +17,38 @@ Collected 24 October 2025, 13:53 UTC, by ICEYE-X52. Spotlight, X-band, VV. The f
 
 ## Run
 
+Run these from the repository root, the directory that contains `pyproject.toml`.
+
 ```bash
 python3 -m venv .venv
 .venv/bin/pip install -r requirements.txt
 .venv/bin/pip install -e .
-python -m scene.fetch
+.venv/bin/python -m scene.fetch
 pnpm --dir frontend install
 pnpm --dir frontend build
-python -m scene.serve
+.venv/bin/python -m scene.serve
 ```
 
-Open http://127.0.0.1:8765. `SCENE_HOST` and `SCENE_PORT` change that address. The product command is `python -m scene.serve`. `pnpm --dir frontend build` writes `frontend/dist`, and the Python process serves that page.
+`python` and `python3` are not the same program here. `python` is `/usr/bin/python`, Python 2.7. `python3` is Python 3.12, and `python3 -m venv .venv` builds the virtualenv from that interpreter. `.venv/bin/pip install -e .` then installs the `scene` package into that virtualenv only. Creating the virtualenv does not change what the command `python` means, and the README does not activate it, so a later `python -m scene.fetch` still runs Python 2.7. That interpreter has no `scene` install, and from the repository root it cannot see `src/scene` either, so it stops with `No module named scene`.
 
-The page is one workspace. The center shows the selected scene. Catalog, library, and scene facts open from the left edge. Stage source, measure, and results open from the right. A download lists each file and its byte count along the bottom. Click the same tool, Close, or Escape to shut a panel.
+From inside `src/`, the same `python` does find the folder named `scene`, because the current directory is on the import path. It then fails on the first Python 3 annotation (`west: float`). The package requires Python 3.12. Call it as `.venv/bin/python`, which is the interpreter the install used.
 
-`python -m scene.fetch` saves the Lisbon test scene under `data/scenes/<id>/`: the STAC record, the thumbnail, the quicklook, and the dwell video. `python -m scene.fetch --all` also streams the GRD (about 484 MB), the colorized sub-aperture image (about 1.2 GB), the georeferenced dwell stack (about 827 MB), and the SLC (about 11 GB). The catalogue URL for that test scene lives in `src/scene/fetch.py`. A flat `data/stac.json` checkout is moved into the scene folder on startup, so files already on disk are not fetched again.
+Open http://127.0.0.1:8765. `SCENE_HOST` and `SCENE_PORT` change that address. The product command is `.venv/bin/python -m scene.serve`. `pnpm --dir frontend build` writes `frontend/dist`, and the Python process serves that page.
+
+The page is one canvas. A labeled tool column sits on the left, the selected scene fills the center, and the chosen tool opens one pane on the right. Preview chooses the quicklook, thumbnail, or dwell video. The analysis groups run a tool on the open scene and put its picture on the stage. Catalog and Library search and open scenes. Facts float on the picture and can be hidden. A download lists each file and its byte count along the bottom. Click the same tool, Close, or Escape to shut the pane.
+
+`.venv/bin/python -m scene.fetch` saves the Lisbon test scene under `data/scenes/<id>/`: the STAC record, the thumbnail, the quicklook, and the dwell video. `.venv/bin/python -m scene.fetch --all` also streams the GRD (about 484 MB), the colorized sub-aperture image (about 1.2 GB), the georeferenced dwell stack (about 827 MB), and the SLC (about 11 GB). The catalogue URL for that test scene lives in `src/scene/fetch.py`. A flat `data/stac.json` checkout is moved into the scene folder on startup, so files already on disk are not fetched again.
 
 The catalog tool searches the [ICEYE open data collection](https://iceye-open-data-catalog.s3.amazonaws.com/collections/iceye-sar.json). That bucket is a static STAC catalog, [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/), with no account. The commercial [ICAS catalog](https://docs.iceye.com/constellation/api/catalog/) is not called: it needs client credentials, and a download there is a purchase. The first search reads the collection link list. Item JSON (footprint, mode, thumbnail) fills in behind that list and is cached in `data/catalog-index.json` for 24 hours. The default download is the preview pack: thumbnail, quicklook, quicklook metadata, and the dwell video when the item has it, plus the STAC record. Large products stay unchecked until someone selects them. One download runs at a time.
 
-When `frontend/dist/index.html` is missing, `GET /` serves the original Python page: the quicklook, the STAC fields, and the person-written `content/scene_note.md`. When the build exists, choosing the Lisbon scene shows its quicklook, and the results panel fills from `intelligence/` if a measurement is already on disk.
+When `frontend/dist/index.html` is missing, `GET /` serves the original Python page: the quicklook, the STAC fields, and the person-written `content/scene_note.md`. When the build exists, choosing a scene shows its quicklook until an analysis picture replaces it.
 
-The measure control runs only for `ICEYE_EYCKP5_20251024T135309Z_6724574_X52_SLF`. The page shows that job's step sentence until it finishes, then puts the overview on the stage and the numbers in the results panel. A second click while a job is running is refused. If the GRD or the dwell stack is missing from that scene folder, the job fails and names `python -m scene.fetch --all`. The button does not download those files. Other downloaded scenes can be previewed. They are not measured.
+The measure control in the tool column is the analysis belt. Each tool reads rasters already on disk and draws a decibel picture with a legend. A tool the scene cannot support stays in the belt and names the missing file or the missing second look. The older Lisbon-only job is still available as `POST /api/jobs/measure`.
 
-The same measurement from the shell:
+The same measurement from the shell, for the Lisbon test scene only:
 
 ```bash
-python -m scene.analyze
+.venv/bin/python -m scene.analyze
 ```
 
 That requires the GRD and the dwell stack on disk. It writes:
@@ -63,7 +69,7 @@ The quicklook, the STAC fields printed beside it, the measurement numbers, the o
 ## What this repository does not do
 
 - No named vessel, no AIS, and no fusion with another sensor. A square in `intelligence/overview.png` is a bright radar return.
-- No claim that a model read the radar. `python -m scene.analyze` calls a model only when `OPENAI_API_KEY` is set, and the prompt may only phrase `measurements.json`.
+- No claim that a model read the radar. `.venv/bin/python -m scene.analyze` calls a model only when `OPENAI_API_KEY` is set, and the prompt may only phrase `measurements.json`.
 - More than one open-data scene can be stored under `data/scenes/`. The bridge measurement runs only on the Lisbon test scene. No change detection and no map library. The quicklook stays in the product's own pixel orientation. No ICAS purchase.
 - Python here is this reader, this job, and this page. It is not a large service other people depend on.
 - No Kubernetes. No air-gapped or classified deploy. Files already on disk and a local process are an offline view of the scenes downloaded here, nothing more.
