@@ -13,7 +13,8 @@ import logging
 import math
 import mimetypes
 import re
-from dataclasses import dataclass
+from collections.abc import Callable, Mapping
+from dataclasses import asdict, dataclass
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -37,7 +38,12 @@ from .downloads import (
     DownloadManager,
     default_downloads,
 )
-from .jobs import JobAlreadyRunningError, MeasurementJobManager, default_manager
+from .jobs import (
+    JobAlreadyRunningError,
+    MeasurementJobManager,
+    OnStep,
+    default_manager,
+)
 from .library import list_library
 from .loader import SceneDataError, SceneRecord, load_scene
 from .page import render_page
@@ -50,6 +56,11 @@ from .paths import (
     static_dir,
     valid_scene_id,
 )
+from .report.facts import ReportFacts, report_facts
+from .report.pdf import build_pdf
+from .report.run import Phraser, run_amplitude, run_report
+from .report.store import ReportStore
+from .report.validate import validate_plan
 
 if TYPE_CHECKING:
     from .quicklook import QuicklookImage
@@ -70,6 +81,16 @@ _ANALYSIS_ROUTE = re.compile(
     r"(?:/(?P<partner>[A-Za-z0-9_-]+))?/overview\.png$"
 )
 _TOOLS_ROUTE = re.compile(r"^/api/scenes/(?P<scene_id>[A-Za-z0-9_-]+)/tools$")
+_REPORT_ROUTE = re.compile(
+    r"^/api/scenes/(?P<scene_id>[A-Za-z0-9_-]+)/report"
+    r"(?P<leaf>/plan|/run|/amplitude|\.pdf)?$"
+)
+_PARTNER_ID = re.compile(r"[A-Za-z0-9_-]+")
+# The longest question a report accepts, in UTF-8 bytes.
+_MAX_QUESTION_BYTES = 2048
+NO_KEY_SENTENCE = "Set OPENAI_API_KEY to ask a question."
+# The one tool that needs a second scene, so the report only waits for it.
+_AMPLITUDE_TOOL = "amplitude-change"
 _QUICKLOOK_CACHE: dict[str, tuple[int, bytes]] = {}
 
 
@@ -354,12 +375,234 @@ def _dispatch_workspace(
             item.group("leaf"),
             _catalog(catalog),
         )
+    report_match = _REPORT_ROUTE.fullmatch(path)
+    if report_match is not None:
+        reply = _report_route(
+            method,
+            report_match.group("scene_id"),
+            report_match.group("leaf"),
+            body,
+            manager,
+        )
+        if reply is not None:
+            return reply
     scene_match = _SCENE_ROUTE.fullmatch(path)
     if scene_match is not None and method == "GET":
         return _scene_route(
             scene_match.group("scene_id"), scene_match.group("leaf"), manager
         )
     return None
+
+
+class _BeltOnlyPhraser:
+    """Used when no key is set: every phrase fails, so the belt's text is kept."""
+
+    def phrase(
+        self, question: str, facts: ReportFacts, measurement: Mapping[str, object]
+    ) -> str:
+        raise RuntimeError(NO_KEY_SENTENCE)
+
+
+def _report_phraser() -> Phraser:
+    """The model chains when a key is set, else the belt-text fallback.
+
+    The chains module is imported here, not at the top, so serving the page,
+    the stored report, and the PDF never load a chat model library.
+    """
+
+    from .report.chains import chains_or_none
+
+    chains = chains_or_none()
+    return chains if chains is not None else _BeltOnlyPhraser()
+
+
+def _report_route(
+    method: str,
+    scene_id: str,
+    leaf: str | None,
+    body: bytes,
+    manager: MeasurementJobManager,
+) -> HttpResponse | None:
+    """The report routes for one scene. None when method and leaf do not match."""
+
+    if method == "GET" and leaf is None:
+        return _guard_scene(scene_id, _get_report)
+    if method == "GET" and leaf == ".pdf":
+        return _guard_scene(scene_id, _report_pdf)
+    if method != "POST":
+        return None
+    if leaf == "/plan":
+        return _guard_scene(scene_id, lambda sid: _plan_report(sid, body))
+    if leaf == "/run":
+        return _guard_scene(scene_id, lambda sid: _run_report(sid, body, manager))
+    if leaf == "/amplitude":
+        return _guard_scene(scene_id, lambda sid: _run_amplitude(sid, body, manager))
+    return None
+
+
+def _guard_scene(scene_id: str, handler: Callable[[str], HttpResponse]) -> HttpResponse:
+    """Run ``handler`` only for a scene that is on disk."""
+
+    if not _scene_on_disk(scene_id):
+        return _plain(404, "Scene is not on disk")
+    return handler(scene_id)
+
+
+def _get_report(scene_id: str) -> HttpResponse:
+    """The stored report, partial while a job runs. Empty when none was saved."""
+
+    try:
+        report = ReportStore(scene_id).load()
+    except (OSError, ValueError, KeyError, TypeError) as exc:
+        LOGGER.error("report for %s could not be read: %s", scene_id, exc)
+        return _plain(500, "The saved report could not be read")
+    if report is None:
+        return _json(200, {"scene_id": scene_id, "question": "", "sections": []})
+    return _json(200, asdict(report))
+
+
+def _report_pdf(scene_id: str) -> HttpResponse:
+    """The stored report as a PDF. It never builds a model."""
+
+    try:
+        report = ReportStore(scene_id).load()
+    except (OSError, ValueError, KeyError, TypeError) as exc:
+        LOGGER.error("report for %s could not be read: %s", scene_id, exc)
+        return _plain(500, "The saved report could not be read")
+    if report is None:
+        return _plain(404, "There is no report for this scene yet")
+    try:
+        document = build_pdf(report)
+    except Exception as exc:  # noqa: BLE001 - one bad section must not kill the server.
+        LOGGER.exception("report PDF for %s failed", scene_id)
+        return _plain(500, f"The PDF could not be built: {exc}")
+    return HttpResponse(200, "application/pdf", document)
+
+
+def _json_body(body: bytes) -> dict[str, object] | HttpResponse:
+    """The request body as a JSON object, or the 400 that says what is wrong."""
+
+    if not body:
+        return _plain(400, "Request body must be a JSON object")
+    try:
+        payload = json.loads(body.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError):
+        return _plain(400, "Request body must be JSON")
+    if not isinstance(payload, dict):
+        return _plain(400, "Request body must be a JSON object")
+    return payload
+
+
+def _question(payload: dict[str, object]) -> str | HttpResponse:
+    """The trimmed question. Empty, missing, or over 2 KiB is a 400."""
+
+    raw = payload.get("question")
+    if not isinstance(raw, str) or not raw.strip():
+        return _plain(400, "question must be a non-empty string")
+    question = raw.strip()
+    if len(question.encode("utf-8")) > _MAX_QUESTION_BYTES:
+        return _plain(400, f"question must be at most {_MAX_QUESTION_BYTES} bytes")
+    return question
+
+
+def _read_facts(scene_id: str) -> ReportFacts | HttpResponse:
+    try:
+        return report_facts(scene_id)
+    except (SceneDataError, OSError, ValueError) as exc:
+        return _plain(404, str(exc))
+
+
+def _plan_report(scene_id: str, body: bytes) -> HttpResponse:
+    """Ask the model which tools answer the question. Nothing is measured."""
+
+    payload = _json_body(body)
+    if isinstance(payload, HttpResponse):
+        return payload
+    question = _question(payload)
+    if isinstance(question, HttpResponse):
+        return question
+    facts = _read_facts(scene_id)
+    if isinstance(facts, HttpResponse):
+        return facts
+    from .report.chains import chains_or_none
+
+    chains = chains_or_none()
+    if chains is None:
+        return _plain(409, NO_KEY_SENTENCE)
+    try:
+        raw = chains.plan(question, facts)
+    except Exception as exc:  # noqa: BLE001 - a model failure is a gateway error.
+        LOGGER.exception("report plan for %s failed", scene_id)
+        return _plain(502, f"The model could not plan the report: {_clip(str(exc))}")
+    return _json(200, asdict(validate_plan(facts, raw)))
+
+
+def _run_report(
+    scene_id: str, body: bytes, manager: MeasurementJobManager
+) -> HttpResponse:
+    """Check the posted tool ids against fresh facts, then start the run."""
+
+    payload = _json_body(body)
+    if isinstance(payload, HttpResponse):
+        return payload
+    question = _question(payload)
+    if isinstance(question, HttpResponse):
+        return question
+    tool_ids = payload.get("tool_ids")
+    if not isinstance(tool_ids, list) or not all(
+        isinstance(item, str) for item in tool_ids
+    ):
+        return _plain(400, "tool_ids must be a list of strings")
+    facts = _read_facts(scene_id)
+    if isinstance(facts, HttpResponse):
+        return facts
+    plan = validate_plan(
+        facts, {"tools": tool_ids, "catalogue_only": [], "partner_id": None}
+    )
+    allowed = {*plan.selected, *plan.waiting}
+    unknown = [item for item in tool_ids if item not in allowed]
+    if unknown or not allowed:
+        return _plain(
+            400, f"Tools that cannot run for this scene: {unknown or 'none chosen'}"
+        )
+
+    def runner(on_step: OnStep) -> None:
+        run_report(scene_id, question, plan, _report_phraser(), on_step)
+
+    try:
+        job_id = manager.start_report(runner)
+    except JobAlreadyRunningError:
+        return _json(409, {"status": "running"})
+    return _json(202, {"job_id": job_id, "status": "running"})
+
+
+def _run_amplitude(
+    scene_id: str, body: bytes, manager: MeasurementJobManager
+) -> HttpResponse:
+    """Run amplitude change against one eligible partner scene."""
+
+    payload = _json_body(body)
+    if isinstance(payload, HttpResponse):
+        return payload
+    partner_id = payload.get("partner_id")
+    if not isinstance(partner_id, str) or not _PARTNER_ID.fullmatch(partner_id):
+        return _plain(400, "partner_id must be one scene id")
+    try:
+        views = {item.id: item for item in tools_for_scene(scene_id)}
+    except (SceneDataError, OSError, ValueError) as exc:
+        return _plain(404, str(exc))
+    amplitude = views.get(_AMPLITUDE_TOOL)
+    if amplitude is None or amplitude.locked or partner_id not in amplitude.partners:
+        return _plain(400, "partner_id is not a scene amplitude change can compare")
+
+    def runner(on_step: OnStep) -> None:
+        run_amplitude(scene_id, partner_id, _report_phraser(), on_step)
+
+    try:
+        job_id = manager.start_report(runner)
+    except JobAlreadyRunningError:
+        return _json(409, {"status": "running"})
+    return _json(202, {"job_id": job_id, "status": "running"})
 
 
 def _clear_demo(body: bytes) -> HttpResponse:
