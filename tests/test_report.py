@@ -550,6 +550,18 @@ class ReportChainsTests(unittest.TestCase):
             self.assertIn(expected, prompt)
         self.assertNotIn("overview-path-leak", prompt)
 
+    def test_phraser_system_prompt_says_a_bright_mark_stays_a_radar_return(
+        self,
+    ) -> None:
+        """The claim limit sits in the prompt, next to the forbid list."""
+        model = FakeChatModel()
+        ReportChains(model).phrase(
+            "How dark?", self.facts, {"summary": [], "limit": "A limit."}
+        )
+        self.assertIn(
+            "A bright mark stays a bright radar return.", model.prompt_text()
+        )
+
     def test_phrase_prompt_is_not_given_other_tools_or_raster_data(self) -> None:
         model = FakeChatModel()
         ReportChains(model).phrase(

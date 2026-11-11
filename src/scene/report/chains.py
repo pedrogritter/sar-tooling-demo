@@ -62,6 +62,7 @@ PHRASER_SYSTEM = (
     "If the overview scale is null, say it is not available. "
     "Do not mention a ship, a spill, a tide height, or a cause "
     "unless it is in the JSON. "
+    "A bright mark stays a bright radar return. "
     "Do not return JSON or a code block."
 )
 
