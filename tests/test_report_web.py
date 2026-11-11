@@ -212,6 +212,23 @@ class PlanRouteTest(WebBase):
         self.assertEqual(self.manager.current().status, "idle")
         self.assertEqual(self.ran, [])
 
+    def test_a_failing_chain_returns_a_fixed_sentence_not_its_text(self) -> None:
+        secret = "sk-secret-123 quota exceeded for org-acme"
+
+        class Failing:
+            def plan(self, question: str, facts: ReportFacts) -> dict[str, object]:
+                raise RuntimeError(secret)
+
+        with self.patched(chains=Failing()):
+            with self.assertLogs("scene", level="ERROR") as logged:
+                response = self.post(self.PATH, {"question": QUESTION})
+        self.assertEqual(response.status, 502)
+        self.assertEqual(
+            response.body.decode().strip(), "The report plan could not be written."
+        )
+        self.assertNotIn("sk-secret", response.body.decode())
+        self.assertIn(secret, "\n".join(logged.output))
+
     def test_404_for_a_scene_that_is_not_on_disk(self) -> None:
         with self.patched(chains=None):
             missing = self.post(
@@ -359,6 +376,22 @@ class GetReportTest(WebBase):
             with self.assertLogs("scene", level="ERROR"):
                 response = self.get(f"/api/scenes/{SCENE}/report")
         self.assertEqual(response.status, 500)
+
+    def test_a_pdf_that_cannot_be_built_returns_a_fixed_sentence(self) -> None:
+        secret = "reportlab exploded at /home/user/secret.png"
+        with self.patched():
+            store = ReportStore(SCENE)
+            store.save(store.new(QUESTION, [_section("open-water", "done")]))
+            with (
+                patch("scene.web.build_pdf", side_effect=RuntimeError(secret)),
+                self.assertLogs("scene", level="ERROR") as logged,
+            ):
+                response = self.get(f"/api/scenes/{SCENE}/report.pdf")
+        self.assertEqual(response.status, 500)
+        self.assertEqual(
+            response.body.decode().strip(), "The report PDF could not be written."
+        )
+        self.assertIn(secret, "\n".join(logged.output))
 
     def test_jobs_current_is_still_the_step_sentence(self) -> None:
         with self.patched():

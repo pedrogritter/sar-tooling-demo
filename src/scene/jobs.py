@@ -77,6 +77,7 @@ class MeasurementJobManager:
         self._sentence = ""
         self._error: str | None = None
         self._result: JobResult | None = None
+        # None means the finished job publishes no result (report jobs).
         self._result_dir: Path | None = None
         self._overview_url = "/overview.png"
         self._step_count = STEP_COUNT
@@ -111,17 +112,17 @@ class MeasurementJobManager:
         """Run one scene report in the worker thread.
 
         The runner reports its own steps and saves ``report.json`` itself. The
-        job reads no measurement of its own, so its result folder is a
-        ``report`` subfolder of the output folder that holds none. That keeps
-        the Lisbon measurement out of a report job's result.
+        job reads no measurement of its own, so a finished report job has no
+        result at all (``None``). An empty result would look like tool output
+        to a belt pane, which treats any done result that way.
         """
 
-        return self._begin(runner, self.output_dir / "report", "", step_count)
+        return self._begin(runner, None, "", step_count)
 
     def _begin(
         self,
         runner: MeasurementRunner,
-        result_dir: Path,
+        result_dir: Path | None,
         overview_url: str,
         step_count: int,
     ) -> str:
@@ -184,8 +185,11 @@ class MeasurementJobManager:
                 self._error = reason
                 self._result = None
             return
-        result = read_job_result(
-            self._result_dir or self.output_dir, self._overview_url
+        # A job with no result folder publishes no result, not an empty one.
+        result = (
+            None
+            if self._result_dir is None
+            else read_job_result(self._result_dir, self._overview_url)
         )
         with self._lock:
             if self._job_id != job_id:

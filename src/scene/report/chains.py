@@ -22,6 +22,7 @@ from pydantic import BaseModel
 from scene.analyze import load_local_env
 from scene.paths import LISBON_SCENE_ID, project_root
 from scene.report.facts import ReportFacts
+from scene.report.schema import CATALOGUE_ONLY_LINE
 
 MODEL_NAME = "gpt-4o-mini"
 
@@ -138,7 +139,11 @@ def _planner_request(question: str, facts: ReportFacts) -> str:
             {key: tool[key] for key in _PLANNER_TOOL_KEYS if key in tool}
             for tool in facts.tools
         ],
-        "catalogue_only": facts.catalogue_only,
+        # Each candidate says it has no GRD on disk, so the plan can say so too.
+        # The ids still come only from the facts, and validate_plan checks them.
+        "catalogue_only": [
+            {**row, "note": CATALOGUE_ONLY_LINE} for row in facts.catalogue_only
+        ],
     }
     parts = [f"Question: {question}", f"Facts:\n{_dump(payload)}"]
     if facts.scene_id == LISBON_SCENE_ID:

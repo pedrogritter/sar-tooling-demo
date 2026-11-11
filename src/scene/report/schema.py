@@ -4,6 +4,9 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
+# Said of every catalogue-only scene, in the planner payload and on the page.
+CATALOGUE_ONLY_LINE = "In the catalogue. The GRD is not downloaded."
+
 
 @dataclass(frozen=True)
 class LockedTool:

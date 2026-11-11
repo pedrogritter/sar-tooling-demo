@@ -416,6 +416,38 @@ class StartReportTest(unittest.TestCase):
             thread.join(timeout=2)
             self.assertEqual(manager.current().status, "done")
 
+    def test_a_finished_report_job_has_no_result_and_keeps_its_sentence(self) -> None:
+        """Belt panes treat any done result as tool output, so a report has none."""
+
+        def runner(on_step: Callable[[int, str], None]) -> None:
+            on_step(2, "Writing the report.")
+
+        with tempfile.TemporaryDirectory() as tmp:
+            manager = MeasurementJobManager(output_dir=Path(tmp))
+            manager.start_report(runner)
+            thread = manager._thread
+            assert thread is not None
+            thread.join(timeout=2)
+            snapshot = manager.current()
+        self.assertEqual(snapshot.status, "done")
+        self.assertIsNone(snapshot.result)
+        self.assertIsNone(snapshot.to_public()["result"])
+        self.assertEqual(snapshot.sentence, "Writing the report.")
+
+    def test_the_lisbon_start_still_publishes_its_result(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            out = Path(tmp)
+            (out / "measurements.json").write_text('{"summary": []}', "utf-8")
+            manager = MeasurementJobManager(runner=lambda on_step: None, output_dir=out)
+            manager.start()
+            thread = manager._thread
+            assert thread is not None
+            thread.join(timeout=2)
+            result = manager.current().result
+        self.assertIsNotNone(result)
+        assert result is not None
+        self.assertEqual(result.measurement, {"summary": []})
+
     def test_a_runner_error_becomes_the_job_error(self) -> None:
         def runner(on_step: Callable[[int, str], None]) -> None:
             raise RuntimeError("The report could not start.")

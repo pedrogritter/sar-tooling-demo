@@ -509,6 +509,21 @@ class ReportChainsTests(unittest.TestCase):
         for leak in ("overview-url-leak", "measurement-leak", "briefing-leak"):
             self.assertNotIn(leak, prompt)
 
+    def test_every_catalogue_candidate_carries_the_not_downloaded_line(self) -> None:
+        """The planner is told the GRD is absent, and still cannot invent an id."""
+        model = FakeChatModel(
+            plan={"tools": [], "catalogue_only": [], "partner_id": None}
+        )
+        ReportChains(model).plan("Is there another date?", self.facts)
+        prompt = model.prompt_text()
+        self.assertIn(CACHED_ID, prompt)
+        self.assertIn("In the catalogue. The GRD is not downloaded.", prompt)
+
+    def test_the_line_does_not_let_the_model_add_an_unlisted_id(self) -> None:
+        raw = {"catalogue_only": [CACHED_ID, "ICEYE_Z_20260301T000000Z_1_X1_SM"]}
+        plan = validate_plan(self.facts, raw)
+        self.assertEqual([row["scene_id"] for row in plan.catalogue_only], [CACHED_ID])
+
     def test_scene_note_is_in_the_plan_prompt_only_for_the_lisbon_scene(self) -> None:
         note = "No detector labelled this frame."
         for scene_id, present in ((LISBON_SCENE_ID, True), (OPEN_ID, False)):

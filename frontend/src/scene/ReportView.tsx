@@ -15,11 +15,15 @@ import { Button, buttonVariants } from "@/components/ui/button"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { summaryFromMeasurement } from "@/scene/placeholder"
 import {
+  type PartnerOption,
   beltText,
   briefingBlocks,
+  catalogueRowText,
   failedSections,
+  initialPartner,
   partnerOptions,
   runnableIds,
+  shouldLoadReport,
   splitPlan,
   toolLabel,
 } from "@/scene/report"
@@ -163,14 +167,31 @@ export function ReportView({ sceneId, onClose }: ReportViewProps) {
     }
   }, [sceneId, running, job])
 
-  // Read the job once after a start, so the poll above takes over.
-  const watchJob = useCallback(async () => {
+  // After every start, read the job and then the report. A job that is
+  // already done or failed on this first read never reaches the poll above,
+  // so its new sections are loaded here. A running job is picked up by the poll.
+  const watchJob = useCallback(async (id: string) => {
     setWatching(true)
 
+    let current: JobSnapshot
+
     try {
-      setJob(await fetchCurrentJob())
+      current = await fetchCurrentJob()
+      setJob(current)
     } catch (error) {
       setRunError(messageFrom(error, "Could not read the report job."))
+      return
+    }
+
+    if (!shouldLoadReport(current.status)) {
+      return
+    }
+
+    try {
+      setReport(await fetchReport(id))
+      setReportError(null)
+    } catch (error) {
+      setReportError(messageFrom(error, "Could not read the saved report."))
     }
   }, [])
 
@@ -214,7 +235,7 @@ export function ReportView({ sceneId, onClose }: ReportViewProps) {
       }
     }
 
-    await watchJob()
+    await watchJob(sceneId)
   }
 
   async function runComparison(partnerId: string) {
@@ -234,7 +255,7 @@ export function ReportView({ sceneId, onClose }: ReportViewProps) {
       }
     }
 
-    await watchJob()
+    await watchJob(sceneId)
   }
 
   if (!sceneId) {
@@ -249,10 +270,12 @@ export function ReportView({ sceneId, onClose }: ReportViewProps) {
 
   const split = plan ? splitPlan(plan) : null
   const options = partnerOptions(plan, scenePartners)
+  // The analyst's pick wins; else the plan's suggestion; else the first scene.
+  // Nothing runs until the analyst posts the comparison.
   const partnerId =
-    partnerChoice && options.includes(partnerChoice)
+    partnerChoice && options.some((option) => option.id === partnerChoice)
       ? partnerChoice
-      : (options[0] ?? "")
+      : initialPartner(options)
   const failed = report ? failedSections(report) : []
   const sections = report?.sections ?? []
 
@@ -438,6 +461,16 @@ function PlanSummary({
             : ""}
         </p>
       ) : null}
+      {plan.catalogue_only.length > 0 ? (
+        <div>
+          <p className="text-muted-foreground">Catalogue only, not run:</p>
+          <ul className="flex flex-col gap-1">
+            {plan.catalogue_only.map((row) => (
+              <li key={row.scene_id}>{catalogueRowText(row)}</li>
+            ))}
+          </ul>
+        </div>
+      ) : null}
       {split.locked.length > 0 ? (
         <div>
           <p className="text-muted-foreground">Locked, not run:</p>
@@ -457,7 +490,7 @@ function PlanSummary({
 
 interface SectionCardProps {
   section: ReportSection
-  partnerOptions: string[]
+  partnerOptions: PartnerOption[]
   partnerId: string
   busy: boolean
   onPartner: (partnerId: string) => void
@@ -539,8 +572,10 @@ function SectionCard({
                 }}
               >
                 {options.map((partner) => (
-                  <option key={partner} value={partner}>
-                    {partner}
+                  <option key={partner.id} value={partner.id}>
+                    {partner.suggested
+                      ? `${partner.id} (suggested)`
+                      : partner.id}
                   </option>
                 ))}
               </select>

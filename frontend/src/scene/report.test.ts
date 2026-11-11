@@ -1,9 +1,13 @@
 import {
+  CATALOGUE_ONLY_LINE,
   beltText,
   briefingBlocks,
+  catalogueRowText,
   failedSections,
+  initialPartner,
   partnerOptions,
   runnableIds,
+  shouldLoadReport,
   splitPlan,
   toolLabel,
 } from "@/scene/report"
@@ -88,15 +92,72 @@ describe("beltText", () => {
 })
 
 describe("partnerOptions", () => {
-  it("uses the partner the plan lists", () => {
+  it("offers every partner and marks the one the plan suggests", () => {
     expect(
       partnerOptions({ ...PLAN, partner_id: "B" }, ["A", "B", "C"])
-    ).toEqual(["B"])
+    ).toEqual([
+      { id: "A", suggested: false },
+      { id: "B", suggested: true },
+      { id: "C", suggested: false },
+    ])
   })
 
-  it("falls back to the scene's partners when the plan has none", () => {
-    expect(partnerOptions(PLAN, ["A", "B"])).toEqual(["A", "B"])
-    expect(partnerOptions(null, ["A"])).toEqual(["A"])
+  it("marks nothing when the plan has no partner or one that is not eligible", () => {
+    expect(partnerOptions(PLAN, ["A", "B"])).toEqual([
+      { id: "A", suggested: false },
+      { id: "B", suggested: false },
+    ])
+    expect(partnerOptions(null, ["A"])).toEqual([{ id: "A", suggested: false }])
+    expect(partnerOptions({ ...PLAN, partner_id: "Z" }, ["A"])).toEqual([
+      { id: "A", suggested: false },
+    ])
+  })
+
+  it("offers nothing when no partner is on disk", () => {
+    expect(partnerOptions({ ...PLAN, partner_id: "B" }, [])).toEqual([])
+  })
+})
+
+describe("initialPartner", () => {
+  it("starts on the suggestion, else the first partner, else nothing", () => {
+    const suggested = partnerOptions({ ...PLAN, partner_id: "C" }, ["A", "C"])
+    expect(initialPartner(suggested)).toBe("C")
+    expect(initialPartner(partnerOptions(PLAN, ["A", "C"]))).toBe("A")
+    expect(initialPartner([])).toBe("")
+  })
+})
+
+describe("shouldLoadReport", () => {
+  it("loads the report for a job that is running, done, or failed", () => {
+    expect(shouldLoadReport("running")).toBe(true)
+    expect(shouldLoadReport("done")).toBe(true)
+    expect(shouldLoadReport("failed")).toBe(true)
+  })
+
+  it("does not load it for an idle job", () => {
+    expect(shouldLoadReport("idle")).toBe(false)
+  })
+})
+
+describe("catalogueRowText", () => {
+  it("names the scene, the collected time, and that the GRD is not downloaded", () => {
+    expect(CATALOGUE_ONLY_LINE).toBe(
+      "In the catalogue. The GRD is not downloaded."
+    )
+    expect(
+      catalogueRowText({
+        scene_id: "ICEYE_C",
+        collected_at: "20260213T000000Z",
+      })
+    ).toBe(
+      "ICEYE_C. Collected 20260213T000000Z. In the catalogue. The GRD is not downloaded."
+    )
+  })
+
+  it("still names the scene when the collected time is missing", () => {
+    expect(catalogueRowText({ scene_id: "ICEYE_C" })).toBe(
+      "ICEYE_C. In the catalogue. The GRD is not downloaded."
+    )
   })
 })
 

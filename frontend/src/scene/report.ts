@@ -1,10 +1,22 @@
 import { ANALYSIS_TOOLS } from "@/scene/tools"
 import type {
+  JobSnapshot,
   Report,
   ReportLockedTool,
   ReportPlan,
   ReportSection,
 } from "@/types"
+
+/** Said of every catalogue-only scene. The server's planner payload says the same. */
+export const CATALOGUE_ONLY_LINE =
+  "In the catalogue. The GRD is not downloaded."
+
+/** One partner scene amplitude change can use, with the plan's suggestion marked. */
+export interface PartnerOption {
+  id: string
+  /** True for the one scene the plan suggests. A suggestion, never a run. */
+  suggested: boolean
+}
 
 /** One block of a stored briefing, read from its small markdown subset. */
 export type BriefingBlock =
@@ -64,18 +76,44 @@ export function beltText(section: ReportSection): string | null {
 }
 
 /**
- * Partners offered for amplitude change: the one the plan lists, or, when the
- * plan lists none, the partners the scene's tool list gives.
+ * Every eligible on-disk partner for amplitude change, in the scene's order.
+ * The plan's partner is marked, not chosen for the analyst, and only when it
+ * is one of the eligible scenes.
  */
 export function partnerOptions(
   plan: ReportPlan | null,
   toolPartners: readonly string[]
-): string[] {
-  if (plan?.partner_id) {
-    return [plan.partner_id]
-  }
+): PartnerOption[] {
+  return toolPartners.map((id) => ({
+    id,
+    suggested: plan?.partner_id === id,
+  }))
+}
 
-  return [...toolPartners]
+/**
+ * The partner the list starts on: the suggestion when there is one, else the
+ * first partner, else an empty string. Choosing it does not run anything.
+ */
+export function initialPartner(options: readonly PartnerOption[]): string {
+  return (options.find((option) => option.suggested) ?? options[0])?.id ?? ""
+}
+
+/**
+ * Whether a job read means the report should be loaded too. A job that is
+ * already done or failed on the first read has still changed the document.
+ */
+export function shouldLoadReport(status: JobSnapshot["status"]): boolean {
+  return status === "running" || status === "done" || status === "failed"
+}
+
+/**
+ * One catalogue-only row of the plan summary: the scene id, the collected
+ * time when the facts have one, and that the GRD is not downloaded.
+ */
+export function catalogueRowText(row: Record<string, string>): string {
+  const collected = row.collected_at ? `Collected ${row.collected_at}. ` : ""
+
+  return `${row.scene_id}. ${collected}${CATALOGUE_ONLY_LINE}`
 }
 
 /**

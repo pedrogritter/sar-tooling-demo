@@ -89,6 +89,10 @@ _PARTNER_ID = re.compile(r"[A-Za-z0-9_-]+")
 # The longest question a report accepts, in UTF-8 bytes.
 _MAX_QUESTION_BYTES = 2048
 NO_KEY_SENTENCE = "Set OPENAI_API_KEY to ask a question."
+# The only text a client reads when the model or the PDF writer fails.
+REPORT_PLAN_FAILED = "The report plan could not be written."
+REPORT_PDF_FAILED = "The report PDF could not be written."
+
 # The one tool that needs a second scene, so the report only waits for it.
 _AMPLITUDE_TOOL = "amplitude-change"
 _QUICKLOOK_CACHE: dict[str, tuple[int, bytes]] = {}
@@ -473,9 +477,10 @@ def _report_pdf(scene_id: str) -> HttpResponse:
         return _plain(404, "There is no report for this scene yet")
     try:
         document = build_pdf(report)
-    except Exception as exc:  # noqa: BLE001 - one bad section must not kill the server.
+    except Exception:  # noqa: BLE001 - one bad section must not kill the server.
+        # The traceback goes to the log. The client gets only the fixed sentence.
         LOGGER.exception("report PDF for %s failed", scene_id)
-        return _plain(500, f"The PDF could not be built: {exc}")
+        return _plain(500, REPORT_PDF_FAILED)
     return HttpResponse(200, "application/pdf", document)
 
 
@@ -531,9 +536,10 @@ def _plan_report(scene_id: str, body: bytes) -> HttpResponse:
         return _plain(409, NO_KEY_SENTENCE)
     try:
         raw = chains.plan(question, facts)
-    except Exception as exc:  # noqa: BLE001 - a model failure is a gateway error.
+    except Exception:  # noqa: BLE001 - a model failure is a gateway error.
+        # Model errors can carry keys, org names, or paths, so they stay in the log.
         LOGGER.exception("report plan for %s failed", scene_id)
-        return _plain(502, f"The model could not plan the report: {_clip(str(exc))}")
+        return _plain(502, REPORT_PLAN_FAILED)
     return _json(200, asdict(validate_plan(facts, raw)))
 
 
