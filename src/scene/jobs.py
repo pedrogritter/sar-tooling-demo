@@ -105,6 +105,19 @@ class MeasurementJobManager:
 
         return self._begin(runner, output_dir, overview_url, step_count)
 
+    def start_report(
+        self, runner: MeasurementRunner, step_count: int = STEP_COUNT
+    ) -> str:
+        """Run one scene report in the worker thread.
+
+        The runner reports its own steps and saves ``report.json`` itself. The
+        job reads no measurement of its own, so its result folder is a
+        ``report`` subfolder of the output folder that holds none. That keeps
+        the Lisbon measurement out of a report job's result.
+        """
+
+        return self._begin(runner, self.output_dir / "report", "", step_count)
+
     def _begin(
         self,
         runner: MeasurementRunner,
