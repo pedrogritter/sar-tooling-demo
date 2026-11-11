@@ -1,4 +1,4 @@
-import { FolderOpen, Image, Search } from "lucide-react"
+import { FileText, FolderOpen, Image, Search } from "lucide-react"
 import type { LucideIcon } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
@@ -13,6 +13,7 @@ const ICONS: Record<(typeof SHELL_TOOLS)[number]["id"], LucideIcon> = {
   preview: Image,
   catalog: Search,
   library: FolderOpen,
+  report: FileText,
 }
 
 interface ToolPickerProps {

@@ -3,7 +3,11 @@ import {
   MeasureJobConflictError,
   fetchCurrentJob,
   fetchScene,
+  planReport,
+  reportPdfUrl,
   startAnalysisJob,
+  startReportAmplitude,
+  startReportRun,
   startMeasureJob,
 } from "@/api"
 
@@ -107,5 +111,73 @@ describe("scene api", () => {
     fetchMock.mockResolvedValue(jsonResponse({ status: "no" }, 400))
 
     await expect(fetchScene()).rejects.toThrow("Request failed with status 400")
+  })
+})
+
+describe("report api", () => {
+  const fetchMock = jest.fn()
+
+  beforeEach(() => {
+    fetchMock.mockReset()
+    global.fetch = fetchMock as typeof fetch
+  })
+
+  it("posts the question to the plan route", async () => {
+    fetchMock.mockResolvedValue(jsonResponse({ selected: [] }))
+
+    await planReport("ICEYE_TEST", "What is dark?")
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/scenes/ICEYE_TEST/report/plan",
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ question: "What is dark?" }),
+      }
+    )
+  })
+
+  it("keeps the plain text of a 409 plan answer", async () => {
+    fetchMock.mockResolvedValue(
+      new Response("Set OPENAI_API_KEY to ask a question.\n", { status: 409 })
+    )
+
+    const error = await planReport("ICEYE_TEST", "q").catch(
+      (caught: unknown) => caught
+    )
+
+    expect(error).toMatchObject({
+      status: 409,
+      message: "Set OPENAI_API_KEY to ask a question.",
+    })
+  })
+
+  it("posts the question and the tool ids to the run route", async () => {
+    fetchMock.mockResolvedValue(
+      jsonResponse({ job_id: "job-3", status: "running" }, 202)
+    )
+
+    await startReportRun("ICEYE_TEST", "q", ["open-water"])
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/scenes/ICEYE_TEST/report/run",
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ question: "q", tool_ids: ["open-water"] }),
+      }
+    )
+  })
+
+  it("turns a running report job into a conflict error", async () => {
+    fetchMock.mockResolvedValue(jsonResponse({ status: "running" }, 409))
+
+    await expect(
+      startReportAmplitude("ICEYE_TEST", "ICEYE_B")
+    ).rejects.toBeInstanceOf(MeasureJobConflictError)
+  })
+
+  it("points the PDF link at the report route", () => {
+    expect(reportPdfUrl("ICEYE_TEST")).toBe("/api/scenes/ICEYE_TEST/report.pdf")
   })
 })

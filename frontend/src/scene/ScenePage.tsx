@@ -1,7 +1,12 @@
 import { Moon, Radar, Sun } from "lucide-react"
 import { useCallback, useEffect, useState } from "react"
 
-import { clearDemoData, fetchDownload, fetchLibrary, fetchSceneById } from "@/api"
+import {
+  clearDemoData,
+  fetchDownload,
+  fetchLibrary,
+  fetchSceneById,
+} from "@/api"
 import { CatalogPanel } from "@/catalog/CatalogPanel"
 import { DownloadDock } from "@/catalog/DownloadDock"
 import { LibraryPanel } from "@/catalog/LibraryPanel"
@@ -12,9 +17,15 @@ import { AnalysisPane } from "@/scene/AnalysisPane"
 import { demoBannerVisible } from "@/scene/placeholder"
 import { ImageStage } from "@/scene/ImageStage"
 import { MetadataOverlay } from "@/scene/MetadataOverlay"
+import { ReportView } from "@/scene/ReportView"
 import { ToolPicker } from "@/scene/ToolPicker"
 import { stageFor, type StageSource } from "@/scene/stage"
-import { isAnalysisTool, selectTool, toolById, type ToolId } from "@/scene/tools"
+import {
+  isAnalysisTool,
+  selectTool,
+  toolById,
+  type ToolId,
+} from "@/scene/tools"
 import type {
   DownloadSnapshot,
   JobResult,
@@ -245,40 +256,50 @@ export function ScenePage() {
           }}
         />
 
-        <div className="relative min-h-[40vh] min-w-0 flex-1 md:min-h-0">
-          <ImageStage
-            loading={stage.loading}
-            src={stage.src}
-            alt={stage.alt}
-            label={stage.label}
-            emptyMessage={stage.emptyMessage}
-            media={stage.media}
+        {tool === "report" ? (
+          <ReportView
+            key={scene?.scene_id ?? "no-scene"}
+            sceneId={scene?.scene_id ?? null}
+            onClose={() => {
+              setTool(null)
+            }}
           />
-          {metadataVisible ? (
-            <MetadataOverlay
-              scene={scene}
-              loading={sceneLoading}
-              error={sceneError}
-              onHide={() => {
-                setMetadataVisible(false)
-              }}
+        ) : (
+          <div className="relative min-h-[40vh] min-w-0 flex-1 md:min-h-0">
+            <ImageStage
+              loading={stage.loading}
+              src={stage.src}
+              alt={stage.alt}
+              label={stage.label}
+              emptyMessage={stage.emptyMessage}
+              media={stage.media}
             />
-          ) : (
-            <Button
-              type="button"
-              variant="secondary"
-              size="xs"
-              className="absolute top-3 right-3 z-10"
-              onClick={() => {
-                setMetadataVisible(true)
-              }}
-            >
-              Metadata
-            </Button>
-          )}
-        </div>
+            {metadataVisible ? (
+              <MetadataOverlay
+                scene={scene}
+                loading={sceneLoading}
+                error={sceneError}
+                onHide={() => {
+                  setMetadataVisible(false)
+                }}
+              />
+            ) : (
+              <Button
+                type="button"
+                variant="secondary"
+                size="xs"
+                className="absolute top-3 right-3 z-10"
+                onClick={() => {
+                  setMetadataVisible(true)
+                }}
+              >
+                Metadata
+              </Button>
+            )}
+          </div>
+        )}
 
-        {tool && selected ? (
+        {tool && tool !== "report" && selected ? (
           <section
             aria-label={selected.label}
             className="flex max-h-[50vh] min-h-0 flex-col border-t md:max-h-none md:w-96 md:border-t-0 md:border-l"

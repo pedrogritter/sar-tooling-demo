@@ -15,6 +15,12 @@ export const SHELL_TOOLS = [
     label: "Library",
     description: "Scenes already on disk, ready to open on the stage.",
   },
+  {
+    id: "report",
+    label: "Report",
+    description:
+      "Ask a question. The tools that answer it run, and each section keeps its limit.",
+  },
 ] as const
 
 export const ANALYSIS_TOOLS = [

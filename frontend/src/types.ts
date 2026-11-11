@@ -189,3 +189,38 @@ export interface AnalysisTool {
 export interface AnalysisToolsResponse {
   tools: AnalysisTool[]
 }
+
+/** One tool the belt keeps locked for this scene, with the belt's own reason. */
+export interface ReportLockedTool {
+  id: string
+  reason: string | null
+}
+
+/** The checked plan returned by POST /api/scenes/<id>/report/plan. */
+export interface ReportPlan {
+  selected: string[]
+  waiting: string[]
+  locked: ReportLockedTool[]
+  catalogue_only: Record<string, string>[]
+  partner_id: string | null
+}
+
+export type ReportSectionStatus =
+  "done" | "waiting" | "locked" | "running" | "failed"
+
+/** One section of GET /api/scenes/<id>/report. */
+export interface ReportSection {
+  tool_id: string
+  status: ReportSectionStatus
+  measurement: Measurement | null
+  briefing_md: string
+  briefing_source: "model" | "belt"
+  overview_url: string | null
+  partner_id: string | null
+}
+
+export interface Report {
+  scene_id: string
+  question: string
+  sections: ReportSection[]
+}
