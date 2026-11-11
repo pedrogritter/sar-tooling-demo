@@ -42,6 +42,7 @@ browser
         +-- one measurement thread           (scene.jobs)
               +-- belt tool                  (scene.belt)
               +-- Lisbon-only job            (scene.analyze)
+              +-- scene report               (scene.report)
         +-- placeholder seed and clear       (scene.demo)
 ```
 
@@ -55,6 +56,7 @@ Startup loads the Lisbon STAC item, the scene note, the fallback static files, a
 | --- | --- |
 | `src/scene/` | Python package. Load a STAC item, search the catalogue, download assets, measure rasters, serve the page. |
 | `src/scene/belt/` | Analysis tools. Each tool reads a coarse overview and writes a picture, a measurement, and a short briefing. |
+| `src/scene/report/` | The scene report. Checks a plan against the scene's facts, runs the chosen belt tools one at a time, phrases each result, and saves `report/report.json` and a PDF. |
 | `src/scene/grid.py` | Affine from full-resolution pixels to longitude and latitude (`proj:transform`). |
 | `src/scene/quicklook.py` | Turns `qlk-cog.tif` into the grayscale PNG the browser shows. |
 | `src/scene/page.py` | Fallback HTML. No question box. |
@@ -86,6 +88,7 @@ data/scenes/<scene-id>/
     overview.png
     measurements.json
     briefing.md
+  report/report.json        the question and one section per tool
 ```
 
 Asset filenames are `{stac-key}{suffix from the href}`, from `scene.naming`. Fetch, the loader, and downloads share that rule. `qlk-cog.tif` and `graphic.png` are the names this checkout uses. A flat `data/stac.json` checkout, from the first Lisbon download, is moved into `data/scenes/<id>/` on startup (`scene.store`). The move is a rename on the same filesystem.
@@ -115,6 +118,11 @@ The server is `ThreadingHTTPServer` from the standard library. It binds `127.0.0
 | `GET /api/scenes/<id>/video` | The local `vid-mp4` file, as `video/mp4`. |
 | `GET /api/scenes/<id>/tools` | Every belt tool, with its lock sentence, pair partners, an overview URL, and the saved summary and briefing when those files are on disk. |
 | `POST /api/demo/clear` | Remove placeholder pictures, analysis files, and `demo.json`. The STAC record stays. Body must be empty. 404 when no scene is marked as a placeholder. |
+| `POST /api/scenes/<id>/report/plan` | Ask the model which tools answer a question. Body: `question`. Nothing is measured. 409 with `Set OPENAI_API_KEY to ask a question.` when the key is unset. 400 when the question is empty or over 2 KiB. 502 when the model call fails. |
+| `POST /api/scenes/<id>/report/run` | Start the report. Body: `question` and `tool_ids`. The ids are checked again against the scene's current facts. A second measurement returns 409. |
+| `POST /api/scenes/<id>/report/amplitude` | Run amplitude change for one partner and rewrite only that section. Body: `partner_id`. 400 when that scene is not an eligible partner. |
+| `GET /api/scenes/<id>/report` | The saved report, partial while a job runs. An empty `sections` list when none was saved. |
+| `GET /api/scenes/<id>/report.pdf` | The saved report as a PDF. 404 when none was saved. |
 | `POST /api/jobs/run` | Start one belt tool. Body: `scene_id`, `tool_id`, optional `partner_id`. |
 | `POST /api/jobs/measure` | Start the Lisbon-only measurement. Body must be empty. Same thread as `/api/jobs/run`. |
 | `GET /api/jobs/current` | That single job: idle, running, done, or failed, plus the step sentence and, when done, the measurement and briefing HTML. |
@@ -130,7 +138,7 @@ The server is `ThreadingHTTPServer` from the standard library. It binds `127.0.0
 | `GET /api/downloads/current` | The single download and a byte count per file. |
 | `POST /client-error` | Browser `error` and `unhandledrejection` events. Logged, not stored. Returns 204. |
 
-A second measurement or a second download returns 409. Unknown paths return a short plain-text error. POST requires `Content-Length`, except `/api/jobs/measure`, `/api/catalog/refresh`, and `/api/demo/clear`, which may be empty. Bodies over 16 KiB are rejected, and a client-error body over 2 KiB is rejected.
+A second measurement or a second download returns 409. A report run is a measurement, so it shares that lock with the belt and the Lisbon job. Unknown paths return a short plain-text error. POST requires `Content-Length`, except `/api/jobs/measure`, `/api/catalog/refresh`, and `/api/demo/clear`, which may be empty. Bodies over 16 KiB are rejected, and a client-error body over 2 KiB is rejected.
 
 Hashed files under `frontend/dist` are cached for a year. `index.html` is `no-store`.
 
@@ -146,7 +154,7 @@ UI kit: React 19, Vite, Tailwind 4, Base UI, and the local `components/ui` primi
 
 ### Two measurement paths
 
-The belt (`scene.belt`) is the path the tool column runs. It works for any scene on disk whose files and geometry the tool accepts. Output stays in that scene's `analysis/` folder. The briefing is markdown rendered from the summary rows and the limit sentence. The belt does not call a model.
+The belt (`scene.belt`) is the path the tool column runs. It works for any scene on disk whose files and geometry the tool accepts. Output stays in that scene's `analysis/` folder. The briefing is markdown rendered from the summary rows and the limit sentence. The belt does not call a model. Only the scene report, below, does, and it keeps the belt briefing as its fallback.
 
 `scene.analyze` is the older Lisbon job. It needs the GRD and the dwell stack for the 25 de Abril collect, optionally reads the colorized sub-aperture image as a second vote, and records the SLC sidecar without detecting on it. `POST /api/jobs/measure` still starts it. `ResultsSection` and `use-measure-job` are still in `frontend/src/scene` and are not mounted by `ScenePage`. `fetchScene` (`GET /api/scene`) is also unused by the page. It remains covered by `frontend/src/api.test.ts`.
 
@@ -217,6 +225,26 @@ Change and stack tools compare scenes that share a look: same orbit direction, s
 | Repeat returns | A bright return seen on many dates against one seen once. Many dates can be a rock, a pier, or a moored hull. |
 | Site activity | A bright cluster that appears or leaves relative to the stack median. |
 | Stack mean | The mean of at least five matched dates. Averaging cuts speckle where the surface was stable. A surface that changed is blurred, not removed. |
+
+### Scene report
+
+A report answers one question about an open scene from the belt. It is saved at `data/scenes/<id>/report/report.json`, one section per tool, in display order. The routes are in the HTTP table above. The Report tool in the tool column calls these routes, and the PDF is the saved report as a file.
+
+The flow has three steps:
+
+1. **Plan.** `POST /api/scenes/<id>/report/plan` sends the question, the STAC-derived scene facts, and the tool list with each lock sentence to the model. For `ICEYE_EYCKP5_20251024T135309Z_6724574_X52_SLF` the planner also reads `content/scene_note.md`. No other scene has a note to read. The model's answer is checked against the facts before it is returned. A tool id the scene does not have is dropped. A locked tool is never selected. Amplitude change is never selected for a run. A suggested partner is kept only when it is one the tool lists as eligible. The plan that comes back has `selected`, `waiting`, `locked`, `catalogue_only`, and `partner_id`. Without `OPENAI_API_KEY` the route answers 409 with `Set OPENAI_API_KEY to ask a question.` and does not build a model.
+2. **Run.** `POST /api/scenes/<id>/report/run` takes the question and the tool ids and re-validates them against the scene's current facts, so a stale plan cannot run a tool that has since locked. An id that cannot run, or an empty choice, is a 400. A job already running is a 409. The run does not need a key. Without one, each section keeps the belt briefing.
+3. **Read.** `GET /api/scenes/<id>/report` returns the sections as they are saved. The report is written after every section, so a read during a run shows a partial report, and a section that is being measured has status `running`. `GET /api/scenes/<id>/report.pdf` renders the saved report and never builds a model.
+
+A section has a tool id, a status, the tool's `measurements.json` content, the briefing markdown, whether that text came from the `model` or the `belt`, the picture URL, and a `partner_id`. The status is `done`, `waiting`, `locked`, `running`, or `failed`. A locked tool is a section with the belt's lock sentence. A tool that fails becomes a `failed` section with a one-line reason, and the next tool still runs.
+
+**One thread.** The report runs on the same measurement thread as the belt, one tool at a time, in the order the plan gave. A tool whose folder already has `measurements.json` is not run again. The report reads that file and its picture, and reports the step as already on disk. Starting a report while any measurement is running is a 409. A second run for the same scene replaces `report.json` as a whole. The files under `analysis/` stay.
+
+**Waiting amplitude section.** Amplitude change needs a second scene, so a report does not run it. When the plan names it and it is not locked, the section is `waiting` with the sentence `The comparison has not been made.` It stays that way until the analyst picks a partner. `POST /api/scenes/<id>/report/amplitude` with `partner_id` then runs that one comparison, which always measures, and rewrites only that section. Every other section keeps its text exactly as saved. A `partner_id` is a 400 unless the tool is unlocked and lists that scene as eligible. The route needs a saved report. Without one the job fails and no report is created.
+
+**Catalogue-only lines.** These are cached catalogue collects that share the open scene's look and overlap and are not on disk. They are listed in the plan, with the scene id and the collected time, so the question can mention other dates. The report does not download them, and a run does not carry them. They are not measured, and they are not in `report.json`.
+
+**What the model may do.** It may phrase the measurements, the STAC fields, and the scene note for `ICEYE_EYCKP5_20251024T135309Z_6724574_X52_SLF` only. Each section is phrased from that tool's summary, its limit sentence, and the mode, incidence, orbit, look side, and overview scale. It may not read a raster, name a vessel, match AIS, or drop a limit sentence. A bright mark stays a bright radar return. A rewrite that does not contain the limit sentence unchanged is discarded, and the section keeps the tool's own `briefing.md`. So does a call that raises an error, and so does a run with no key. The model is `gpt-4o-mini` at temperature 0, and `OPENAI_API_KEY` is read from the environment or a gitignored `.env`, as for the Lisbon briefing.
 
 ### Fallback page and the Lisbon briefing
 
@@ -314,11 +342,12 @@ A model in any of the items below may phrase measurements, STAC fields, the scen
 
 ### LangChain pipeline
 
-- [ ] A short LangChain pipeline over tools that already exist. The first answer path stays plain Python over the STAC fields and `content/scene_note.md`, which is the slice `scene.page` already defers. LangChain wraps that, it does not replace the belt. Each belt tool is one tool call: run it, then read the `measurements.json` and the limit sentence it wrote. Tools run one at a time, because the process has one measurement thread. The prompt may use only the tool output, the STAC fields, and the scene note. `OPENAI_API_KEY` stays optional and outside the image.
+- [x] A short LangChain pipeline over tools that already exist. It has landed as the scene report (see Scene report above): a planner chain and a phrasing chain over the belt, one tool at a time on the measurement thread, with the limit sentence kept. `OPENAI_API_KEY` stays optional and outside the image.
+- [ ] The Open water lesson. It is not built. When it is, it must follow the same claim limits as the report.
 
 ### Agent
 
-- [ ] An agent on that pipeline. A natural-language request chooses belt tools, runs them, and compiles the pictures and summaries for the open scene. The person sees which tool ran and the limit sentence that came back. A locked tool is part of the answer, not a silent skip. Downloading a large raster stays a separate confirmation. The agent does not pick ICAS, and it does not name a vessel the tools did not name.
+- [ ] An agent that chooses tools on its own, on top of the report pipeline. Today the model only proposes a plan, the server checks it, and a person starts the run. A natural-language request chooses belt tools, runs them, and compiles the pictures and summaries for the open scene. The person sees which tool ran and the limit sentence that came back. A locked tool is part of the answer, not a silent skip. Downloading a large raster stays a separate confirmation. The agent does not pick ICAS, and it does not name a vessel the tools did not name.
 
 ### Optional retrieval
 
