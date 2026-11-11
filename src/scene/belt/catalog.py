@@ -6,10 +6,12 @@ import json
 from dataclasses import dataclass
 from pathlib import Path
 
+from scene.demo import note_from_folder
+from scene.jobs import read_job_result
 from scene.loader import SceneDataError, load_scene
 from scene.paths import scene_dir, valid_scene_id
 
-from .geometry import Collect, can_pair, is_calibrated_mode
+from .geometry import INCIDENCE_TOLERANCE, Collect, can_pair, is_calibrated_mode
 from .raster import calibration_factor, read_json
 
 STACK_MIN = 2
@@ -146,6 +148,8 @@ class ToolView:
     needs_partner: bool
     partners: tuple[str, ...]
     overview_url: str | None
+    measurement: object | None
+    briefing_html: str | None
 
     def to_public(self) -> dict[str, object]:
         return {
@@ -158,6 +162,8 @@ class ToolView:
             "needs_partner": self.needs_partner,
             "partners": list(self.partners),
             "overview_url": self.overview_url,
+            "measurement": self.measurement,
+            "briefing_html": self.briefing_html,
         }
 
 
@@ -175,9 +181,13 @@ def tools_for_scene(scene_id: str) -> list[ToolView]:
     others = [item for item in _library() if item.scene_id != scene_id]
     matches = tuple(item.scene_id for item in others if can_pair(current, item))
     views: list[ToolView] = []
+    note = note_from_folder(scene_dir(scene_id))
     for spec in TOOLS:
         locked, reason = _lock(spec, current, matches)
+        if locked and note:
+            reason = f"{note} {reason}"
         partner = spec.kind == "pair"
+        saved = _saved_result(scene_id, spec.id)
         views.append(
             ToolView(
                 id=spec.id,
@@ -191,6 +201,8 @@ def tools_for_scene(scene_id: str) -> list[ToolView]:
                 if spec.kind in {"pair", "stack", "stack-mean"}
                 else (),
                 overview_url=_overview_url(scene_id, spec.id),
+                measurement=saved[0],
+                briefing_html=saved[1],
             )
         )
     return views
@@ -231,23 +243,34 @@ def _lock(
         if not matches:
             return (
                 True,
-                "Amplitude change needs a second calibrated scene with the same "
-                "orbit direction, the same look side, and grd-cog.tif on disk.",
+                "Amplitude change needs a second calibrated scene with "
+                f"{_same_look()}, and grd-cog.tif on disk.",
             )
         return False, ""
     if spec.kind == "stack" and len(matches) + 1 < STACK_MIN:
         return (
             True,
-            "This stack tool needs at least one other calibrated scene with the "
-            "same orbit direction, the same look side, and grd-cog.tif on disk.",
+            "This stack tool needs at least one other calibrated scene with "
+            f"{_same_look()}, and grd-cog.tif on disk.",
         )
     if spec.kind == "stack-mean" and len(matches) + 1 < STACK_MEAN_MIN:
         return (
             True,
-            "The stack mean needs five calibrated scenes that share this orbit "
-            "direction and look side.",
+            "The stack mean needs five calibrated scenes that share "
+            f"{_same_look()}.",
         )
     return False, ""
+
+
+def _same_look() -> str:
+    """The pairing clause. The number is the tolerance ``can_pair`` enforces."""
+
+    span = f"{INCIDENCE_TOLERANCE:g}"
+    unit = "degree" if INCIDENCE_TOLERANCE == 1 else "degrees"
+    return (
+        "the same orbit direction, the same look side, and an incidence "
+        f"angle within {span} {unit}"
+    )
 
 
 def _uncalibrated(current: Collect) -> tuple[bool, str]:
@@ -261,6 +284,30 @@ def _uncalibrated(current: Collect) -> tuple[bool, str]:
         True,
         "This GRD sidecar has no calibration factor, so sigma-nought is not available.",
     )
+
+
+def _saved_result(scene_id: str, tool_id: str) -> tuple[object | None, str | None]:
+    """Summary and briefing already written for this tool, if the files exist."""
+
+    folder = _result_dir(scene_id, tool_id)
+    if folder is None:
+        return None, None
+    result = read_job_result(folder, _overview_url(scene_id, tool_id) or "")
+    return result.measurement, result.briefing_html
+
+
+def _result_dir(scene_id: str, tool_id: str) -> Path | None:
+    folder = analysis_dir(scene_id, tool_id)
+    if (folder / "measurements.json").is_file() or (folder / "overview.png").is_file():
+        return folder
+    if not folder.is_dir():
+        return None
+    for child in sorted(folder.iterdir()):
+        saved = (child / "measurements.json").is_file()
+        picture = (child / "overview.png").is_file()
+        if child.is_dir() and (saved or picture):
+            return child
+    return None
 
 
 def _overview_url(scene_id: str, tool_id: str) -> str | None:

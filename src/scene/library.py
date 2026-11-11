@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from .demo import note_from_folder
 from .loader import Asset, SceneDataError, SceneRecord, load_scene
 from .paths import LISBON_SCENE_ID, data_dir, valid_scene_id
 
@@ -35,13 +36,13 @@ def list_library(root: Path | None = None) -> list[dict[str, object]]:
             scene = load_scene(stac)
         except SceneDataError:
             continue
-        entries.append(_entry(scene))
+        entries.append(_entry(scene, child))
     entries.sort(key=lambda entry: str(entry["collected_at"]), reverse=True)
     entries.sort(key=lambda entry: not bool(entry["is_test_scene"]))
     return entries
 
 
-def _entry(scene: SceneRecord) -> dict[str, object]:
+def _entry(scene: SceneRecord, folder: Path) -> dict[str, object]:
     scene_id = scene.scene_id
     graphic = scene.asset("graphic")
     quicklook = scene.asset("qlk-cog")
@@ -54,6 +55,7 @@ def _entry(scene: SceneRecord) -> dict[str, object]:
         "mode": scene.mode,
         "assets_on_disk": [asset.key for asset in scene.assets if asset.on_disk],
         "is_test_scene": scene_id == LISBON_SCENE_ID,
+        "placeholder": note_from_folder(folder) is not None,
         "quicklook_url": (
             f"/api/scenes/{scene_id}/quicklook.png" if has_quicklook else None
         ),

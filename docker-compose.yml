@@ -1,0 +1,13 @@
+services:
+  scene:
+    build: .
+    ports:
+      - "8765:8765"
+    environment:
+      SCENE_HOST: 0.0.0.0
+      SCENE_PORT: "8765"
+    volumes:
+      - scene-data:/app/data
+
+volumes:
+  scene-data:

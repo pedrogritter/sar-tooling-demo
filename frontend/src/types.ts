@@ -61,6 +61,8 @@ export interface SceneResponse {
   video_url: string | null
   assets_on_disk: string[]
   is_test_scene: boolean
+  placeholder: boolean
+  placeholder_note: string | null
   measurement: Measurement | null
   briefing_html: string | null
   overview_url: string | null
@@ -93,6 +95,12 @@ export interface CatalogItem {
   product_code: string | null
   mode: string | null
   incidence_angle: number | null
+  orbit: string | null
+  look: string | null
+  place: string | null
+  has_grd: boolean
+  has_slc: boolean
+  has_video: boolean
   bbox: BoundingBox | null
   cached: boolean
   thumbnail_url: string | null
@@ -133,6 +141,7 @@ export interface LibraryScene {
   mode: string
   assets_on_disk: string[]
   is_test_scene: boolean
+  placeholder: boolean
   quicklook_url: string | null
   thumbnail_url: string | null
   video_url: string | null
@@ -173,6 +182,8 @@ export interface AnalysisTool {
   needs_partner: boolean
   partners: string[]
   overview_url: string | null
+  measurement: Measurement | null
+  briefing_html: string | null
 }
 
 export interface AnalysisToolsResponse {

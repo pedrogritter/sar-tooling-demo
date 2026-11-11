@@ -15,6 +15,7 @@ import logging
 import os
 import sys
 
+from scene.demo import seed_if_needed
 from scene.loader import SceneDataError
 from scene.web import build_state, serve
 
@@ -24,6 +25,8 @@ def main() -> None:
     host = os.environ.get("SCENE_HOST", "127.0.0.1")
     port = _port(os.environ.get("SCENE_PORT", "8765"))
     try:
+        # An empty data directory gets the labeled placeholder before listen.
+        seed_if_needed()
         state = build_state()
         serve(state, host=host, port=port)
     except SceneDataError as exc:

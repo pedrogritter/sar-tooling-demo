@@ -1,5 +1,7 @@
 # Lisbon spotlight scene
 
+The current description of the application — objectives, architecture, features, how to work on it, and open work — is [docs/application.md](docs/application.md). Update that file when the application changes. This README stays the checkout and run sheet.
+
 Public ICEYE scene `ICEYE_EYCKP5_20251024T135309Z_6724574_X52_SLF`, from the [ICEYE open data catalogue](https://www.iceye.com/open-data-initiative), licensed [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/). This repository does not include the radar files.
 
 Collected 24 October 2025, 13:53 UTC, by ICEYE-X52. Spotlight, X-band, VV. The footprint covers the 25 de Abril bridge. The package name is `scene`. This checkout points `src/scene/fetch.py` at this collect, and `content/scene_note.md` is the note for it.
@@ -9,7 +11,9 @@ Collected 24 October 2025, 13:53 UTC, by ICEYE-X52. Spotlight, X-band, VV. The f
 | Path | Role |
 | --- | --- |
 | `src/scene/` | Python package: fetch the STAC assets, measure them, and serve the page |
-| `frontend/` | Vite and React page. `pnpm --dir frontend build` writes `frontend/dist` |
+| `frontend/` | Vite and React page. Node 26.13.0. `pnpm --dir frontend build` writes `frontend/dist` |
+| `Dockerfile`, `docker-compose.yml` | One image and one command. Radar files stay on the volume |
+| `demo/build_seed.py` | Draws the placeholder scene the container copies on an empty volume |
 | `content/scene_note.md` | Person-written note shown on the fallback page |
 | `data/` | Downloaded scenes in `data/scenes/<id>/`, plus the catalog index. Gitignored |
 | `intelligence/` | Measurement outputs. `overview.png` is gitignored |
@@ -17,7 +21,17 @@ Collected 24 October 2025, 13:53 UTC, by ICEYE-X52. Spotlight, X-band, VV. The f
 
 ## Run
 
-Run these from the repository root, the directory that contains `pyproject.toml`.
+From a fresh clone, one command builds the image and serves the page:
+
+```bash
+docker compose up --build
+```
+
+Open http://127.0.0.1:8765. The image does not contain radar files. The first start copies a labeled placeholder of the Lisbon test scene into a Docker volume: a drawn quicklook, and saved results for five analysis tools. The banner says those pictures and numbers were not measured from an ICEYE raster. **Clear demo data** removes the pictures and leaves the STAC record. It does not come back on the next start while that record is there. If the record is removed and the scene folder is empty, the next start seeds again. A folder that already has files is not overwritten. A catalog download or `python -m scene.fetch` of that same scene removes the placeholder when the download finishes. A failed download leaves it in place. `docker compose down -v` deletes the volume, and the next `up` seeds again.
+
+`SCENE_HOST` is `0.0.0.0` inside the container. The published port is 8765.
+
+To work on the code, run these from the repository root, the directory that contains `pyproject.toml`. The frontend expects Node 26.13.0 (`frontend/.nvmrc`).
 
 ```bash
 python3 -m venv .venv
@@ -70,14 +84,13 @@ The quicklook, the STAC fields printed beside it, the measurement numbers, the o
 
 - No named vessel, no AIS, and no fusion with another sensor. A square in `intelligence/overview.png` is a bright radar return.
 - No claim that a model read the radar. `.venv/bin/python -m scene.analyze` calls a model only when `OPENAI_API_KEY` is set, and the prompt may only phrase `measurements.json`.
-- More than one open-data scene can be stored under `data/scenes/`. The bridge measurement runs only on the Lisbon test scene. No change detection and no map library. The quicklook stays in the product's own pixel orientation. No ICAS purchase.
+- More than one open-data scene can be stored under `data/scenes/`. The bridge measurement runs only on the Lisbon test scene. Amplitude change compares two calibrated scenes of the same look and reports area that differs by at least 3 dB in a patch of at least 8 pixels. It does not name a flood or a vessel. No map library. The quicklook stays in the product's own pixel orientation. No ICAS purchase.
 - Python here is this reader, this job, and this page. It is not a large service other people depend on.
 - No Kubernetes. No air-gapped or classified deploy. Files already on disk and a local process are an offline view of the scenes downloaded here, nothing more.
 - No LangChain and no LangGraph. A later answer, if the page is right, has to work in plain Python over the STAC fields and the note before any framework wraps it.
 - No defense customer and no live track match. The scene is ICEYE open data.
 - GIS employment is not represented here. The note is a personal reading of one open scene.
-
-Docker is not in this slice. The next piece, after this page is the one worth showing, is one container and one command.
+- The container placeholder is not a measurement of the 25 de Abril collect. The page says so until it is cleared or a real download replaces it.
 
 ## Tests
 

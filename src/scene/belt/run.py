@@ -97,12 +97,17 @@ LIMITS = {
     ),
     "amplitude-change": (
         "Red is the earlier date and has fled. Cyan is the later date and is new. "
-        "Gray held its brightness. The areas are the measurement."
+        "Gray held its brightness, or the difference is under 3 dB, or the patch "
+        "is smaller than 8 pixels. Speckle and a residual shift can still colour "
+        "a larger patch. The areas are the measurement."
     ),
-    "water-persistence": "Light blue is rare water. Solid blue is water on every date.",
+    "water-persistence": (
+        "Light blue is rare water. Solid blue is water on every date. "
+        "Two dates are a pair, not a seasonal record."
+    ),
     "sea-state": (
-        "The bars are the median sigma-nought of the water mask. "
-        "A low bar is a calm sea."
+        "The bars are the median sigma-nought of the water mask on each date. "
+        "A lower bar is a darker sea, not a Beaufort number."
     ),
     "dark-sea-anomaly": (
         "A film is one cause. The same shape can be a biogenic film, a wind shadow, "
@@ -112,7 +117,8 @@ LIMITS = {
         "Each colour is one date. The shift is a waterline, not a tide height."
     ),
     "date-of-change": (
-        "A pixel is coloured only when it leaves the stack median by 1.5 dB."
+        "A pixel is coloured only when it leaves the stack median by 3 dB "
+        "and the patch is at least 8 pixels."
     ),
     "repeat-returns": (
         "Many dates is a rock, a pier, or a moored hull. One date is a passing return."
@@ -121,7 +127,10 @@ LIMITS = {
         "Cyan is a bright cluster new on this date. Red is a bright cluster the stack "
         "median had and this date does not."
     ),
-    "stack-mean": "Averaging matched dates cuts speckle where the surface was stable.",
+    "stack-mean": (
+        "The mean uses at least five matched dates. Averaging cuts speckle "
+        "where the surface was stable. A surface that changed is blurred, not removed."
+    ),
 }
 
 
@@ -263,6 +272,16 @@ def _single_layers(
         )
     if tool_id == "sea-roughness":
         calm, rough, note = split_roughness(frame.db, water)
+        if "one class" in note:
+            return (
+                [
+                    {"label": "Water area", "value": _km2(water, frame)},
+                    {"label": "Split", "value": "none"},
+                ],
+                [MaskLayer(water, WATER)],
+                [],
+                [note],
+            )
         summary = [
             {"label": "Calm area", "value": _km2(calm, frame)},
             {"label": "Rough area", "value": _km2(rough, frame)},
@@ -273,7 +292,7 @@ def _single_layers(
             summary,
             [MaskLayer(calm, CALM), MaskLayer(rough, ROUGH)],
             [],
-            ["Dark blue: calm water.", "Light blue: wind-roughened water.", note],
+            ["Dark blue: below the median.", "Light blue: above the median.", note],
         )
     if tool_id == "built-up":
         built = built_up_mask(frame.db, water, mode)

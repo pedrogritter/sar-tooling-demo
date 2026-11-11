@@ -2,6 +2,11 @@ import { useEffect, useRef, useState } from "react"
 
 import { fetchAnalysisTools } from "@/api"
 import { MeasureCard } from "@/scene/MeasureCard"
+import {
+  savedToolResult,
+  summaryFromMeasurement,
+} from "@/scene/placeholder"
+import { analysisRunDisabled } from "@/scene/stage"
 import { useAnalysisJob } from "@/scene/use-analysis-job"
 import type { AnalysisTool, JobResult } from "@/types"
 
@@ -72,15 +77,17 @@ export function AnalysisPane({
   }, [onResult])
 
   useEffect(() => {
-    if (!tool?.overview_url || job.snapshot?.status === "running") {
+    const status = job.snapshot?.status
+    if (status === "running" || status === "done") {
       return
     }
 
-    onResultRef.current({
-      measurement: null,
-      briefing_html: null,
-      overview_url: tool.overview_url,
-    })
+    const saved = savedToolResult(tool)
+    if (!saved.overview_url && !saved.measurement && !saved.briefing_html) {
+      return
+    }
+
+    onResultRef.current(saved)
   }, [job.snapshot?.status, tool])
 
   if (!sceneId) {
@@ -93,7 +100,13 @@ export function AnalysisPane({
 
   const locked = tool?.locked ?? true
   const reason = tool?.reason || loadError
-  const summary = summaryRows(job.snapshot?.result?.measurement ?? null)
+  const running = job.isRunning || job.snapshot?.status === "running"
+  const shown = running
+    ? null
+    : job.snapshot?.status === "done" && job.snapshot.result
+      ? job.snapshot.result
+      : savedToolResult(tool)
+  const summary = summaryFromMeasurement(shown?.measurement ?? null)
 
   return (
     <div className="flex flex-col gap-3 p-3">
@@ -128,11 +141,11 @@ export function AnalysisPane({
         isRunning={job.isRunning}
         startError={job.startError}
         showHeading={false}
-        disabled={locked || !tool}
+        disabled={analysisRunDisabled(tool)}
         actionLabel="Run tool"
         runningLabel="Running"
         onMeasure={() => {
-          if (!sceneId || locked) {
+          if (!sceneId || analysisRunDisabled(tool)) {
             return
           }
 
@@ -149,33 +162,16 @@ export function AnalysisPane({
           ))}
         </dl>
       ) : null}
-      {job.snapshot?.result?.briefing_html ? (
+      {shown?.briefing_html ? (
         <div
           className="text-sm leading-6 text-muted-foreground"
           dangerouslySetInnerHTML={{
-            __html: job.snapshot.result.briefing_html,
+            __html: shown.briefing_html,
           }}
         />
       ) : null}
     </div>
   )
-}
-
-function summaryRows(
-  measurement: JobResult["measurement"]
-): { label: string; value: string }[] {
-  const summary = measurement?.summary
-  if (!Array.isArray(summary)) {
-    return []
-  }
-
-  return summary.flatMap((row) => {
-    if (!row || typeof row.label !== "string" || typeof row.value !== "string") {
-      return []
-    }
-
-    return [{ label: row.label, value: row.value }]
-  })
 }
 
 function messageFrom(error: unknown): string {

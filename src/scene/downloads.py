@@ -16,6 +16,7 @@ from pathlib import Path
 from typing import Literal
 
 from .catalog import CatalogAsset, CatalogError, CatalogService, default_asset_keys
+from .demo import strip_placeholder
 from .fetch import fetch as fetch_asset
 from .fetch import remote_size as remote_content_length
 from .naming import local_asset_name
@@ -87,15 +88,19 @@ class DownloadManager:
         known = {asset.key: asset for asset in record.assets}
         for key in selected:
             asset = known[key]
+            name = local_asset_name(key, asset.href)
+            target = folder / name
+            if not _path_inside(folder, target):
+                raise DownloadError(f"Asset {key} leaves the scene folder")
             files.append(
                 _File(
                     key=key,
-                    name=local_asset_name(key, asset.href),
+                    name=name,
                     href=asset.href,
                     state="pending",
                     bytes_done=0,
                     bytes_total=0,
-                    path=folder / local_asset_name(key, asset.href),
+                    path=target,
                 )
             )
         with self._lock:
@@ -164,6 +169,9 @@ class DownloadManager:
                 if not self._active(job_id):
                     return
                 self._transfer(job_id, index)
+            if not self._active(job_id):
+                return
+            strip_placeholder(folder, replaced=self._written_names(job_id))
         except Exception as exc:
             self._fail(job_id, _short(exc))
             return
@@ -242,6 +250,12 @@ class DownloadManager:
             self._status = "failed"
             self._error = reason
 
+    def _written_names(self, job_id: str) -> list[str]:
+        with self._lock:
+            if self._job_id != job_id:
+                return []
+            return [item.name for item in self._files]
+
     def _active(self, job_id: str) -> bool:
         with self._lock:
             return self._job_id == job_id and self._status == "running"
@@ -268,6 +282,16 @@ def _selected_keys(
         if key not in chosen:
             chosen.append(key)
     return chosen
+
+
+def _path_inside(folder: Path, target: Path) -> bool:
+    """True when ``target`` stays inside ``folder`` after ``..`` is resolved."""
+
+    try:
+        target.resolve().relative_to(folder.resolve())
+    except (OSError, ValueError):
+        return False
+    return True
 
 
 def _stac_file(folder: Path) -> _File:

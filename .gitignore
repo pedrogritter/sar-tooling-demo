@@ -1,6 +1,9 @@
 # Radar products downloaded by python -m scene.fetch. They stay on this machine.
 data/
 
+# Generated placeholder tree. The container builds it, then copies it into data/.
+demo/seed/
+
 # Rendered radar overview. The small measurement files stay with the code.
 intelligence/overview.png
 

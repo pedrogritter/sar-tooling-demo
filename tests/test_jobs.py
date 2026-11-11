@@ -58,7 +58,7 @@ EXPECTED_STEPS = (
     "Checking that the GRD is on disk.",
     "Checking that the dwell stack is on disk.",
     "Checking the sub-aperture image.",
-    "Measuring dark water and the deck return.",
+    "Measuring dark water and the long bright return.",
     "Tracking bright returns across the dwell.",
     "Comparing each return with its sub-aperture neighborhood.",
     "Recording the SLC sidecar without detecting on it.",
@@ -383,6 +383,62 @@ class WebApiTest(unittest.TestCase):
             server.shutdown()
             thread.join(timeout=5)
             server.server_close()
+
+
+class LisbonWordingTest(unittest.TestCase):
+    def test_the_long_return_is_not_named_a_bridge_or_a_ship(self) -> None:
+        import numpy as np
+
+        from scene.grid import Grid
+
+        maximum = np.full((50, 30), 10.0, dtype=np.float32)
+        water = np.zeros(maximum.shape, dtype=bool)
+        water[:, :6] = True
+        maximum[:, 6:9] = 100.0
+        found = analyze.find_bridge(
+            maximum,
+            water,
+            10.0,
+            10.0,
+            10.0,
+            10.0,
+            Grid(0.0, 0.001, 0.0, 0.0, 0.0, -0.001),
+            1.0,
+        )
+        self.assertIsNotNone(found)
+        assert found is not None
+        self.assertEqual(found["kind"], "long bright return")
+        self.assertNotIn("ship", str(found["kind"]))
+        self.assertNotIn("bridge", str(found["kind"]))
+
+        briefing = analyze.render_briefing(
+            {
+                "water_km2": 1.0,
+                "scene_km2": 2.0,
+                "water_fraction": 0.5,
+                "water_sigma0_db": -16.0,
+                "measurement_grid_m": 8,
+                "dwell_s": 15,
+                "basins": [{"area_km2": 0.4, "median_sigma0_db": -17.0}],
+                "bridge": {"length_m": 500, "width_m": 40, "peak_sigma0_db": 12.0},
+                "returns": [
+                    {
+                        "lat": 38.69,
+                        "lon": -9.17,
+                        "motion": "moved",
+                        "displacement_m": 30,
+                        "speed_m_s": 2,
+                        "area_m2": 80,
+                        "peak_sigma0_db": 8,
+                    }
+                ],
+            }
+        )
+        self.assertIn("Water component 1", briefing)
+        self.assertIn("long bright return", briefing)
+        self.assertIn("not a named ship", briefing)
+        self.assertNotIn("bridge", briefing.lower())
+        self.assertNotIn("deck", briefing.lower())
 
 
 if __name__ == "__main__":

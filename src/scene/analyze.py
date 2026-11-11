@@ -48,7 +48,7 @@ STEP_SENTENCES = (
     "Checking that the GRD is on disk.",
     "Checking that the dwell stack is on disk.",
     "Checking the sub-aperture image.",
-    "Measuring dark water and the deck return.",
+    "Measuring dark water and the long bright return.",
     "Tracking bright returns across the dwell.",
     "Comparing each return with its sub-aperture neighborhood.",
     "Recording the SLC sidecar without detecting on it.",
@@ -326,7 +326,7 @@ def find_bridge(
     values = maximum[ys, xs]
     lon, lat = grid.to_lonlat(centre_col, centre_row, scale)
     return {
-        "kind": "bridge deck return",
+        "kind": "long bright return",
         "area_m2": round(float(len(xs)) * col_m * row_m, 1),
         "length_m": round(length_m, 1),
         "width_m": round(width_m, 1),
@@ -607,7 +607,7 @@ def measure_motion(
             "moved" if shift >= mover_min else "stationary during the dwell"
         )
         if near_bridge(item, scene["_bridge"], scene["_grid"], scene["_scale"]):  # type: ignore[arg-type]
-            item["kind"] = "bright return on the deck line"
+            item["kind"] = "bright return on the long line"
     bridge = scene["_bridge"]
     changes = 0
     if isinstance(bridge, dict):
@@ -624,8 +624,8 @@ def measure_motion(
     scene["dwell_frames"] = frames
     scene["deck_changes"] = changes
     scene["deck_changes_note"] = (
-        "Clusters of high frame-to-frame variance within 40 m of the deck line. "
-        "Not a vehicle count."
+        "Clusters of high frame-to-frame variance within 40 m "
+        "of the long bright return. Not a vehicle count."
     )
     for item in scene["returns"]:  # type: ignore[index]
         match = next(raw for raw in scene["_returns"] if raw["lon"] == item["lon"])  # type: ignore[index]
@@ -914,24 +914,24 @@ def render_briefing(scene: dict[str, object]) -> str:
     ]
     for index, basin in enumerate(basins, start=1):
         lines.append(
-            f"Basin {index}: {basin['area_km2']} km², "
+            f"Water component {index}: {basin['area_km2']} km², "
             f"median {basin['median_sigma0_db']} dB."
         )
     lines.append("")
     if bridge:
         lines.append(
-            f"The deck return runs {bridge['length_m']} m end to end "
+            f"The long bright return runs {bridge['length_m']} m end to end "
             f"and is {bridge['width_m']} m across, "
             f"peak {bridge['peak_sigma0_db']} dB. "
             "The width is the bright radar return, layover included, "
-            "not the roadway. It is not a traffic count."
+            "not a roadway. It is not a traffic count."
         )
         lines.append("")
     lines.append(
         f"Bright returns at the waterline: {len(returns)}. "
         f"Shifted during the {scene.get('dwell_s')} s dwell: {len(moved)}. "
-        "The dwell does not separate vehicles on the deck from the "
-        "deck's own speckle, so there is no traffic count."
+        "The dwell does not separate a bright return on that line from the "
+        "line's own speckle, so there is no traffic count."
     )
     lines.append("")
     for item in returns:
@@ -1012,16 +1012,19 @@ def model_briefing(scene: dict[str, object]) -> str | None:
                     "Do not return JSON, a code block, "
                     "or a field-by-field restatement. "
                     "Use only numbers that are in the JSON. "
-                    "Include the water area, both basin areas and their median sigma0, "
-                    "the deck length, deck width, and deck peak_sigma0_db. "
+                    "Include the water area, both water-component areas "
+                    "and their median sigma0, the long bright return's "
+                    "length, width, and peak_sigma0_db. "
                     "Brightness is peak_sigma0_db, in dB. "
                     "A return is moving only when its motion field "
                     "is exactly \"moved\". "
                     "For each moving return give coordinates, displacement, speed, "
                     "area, and peak_sigma0_db. "
-                    "Call a row a bright return or a moving return, never a ship type. "
+                    "Call a row a bright return or a moving return, never a ship type "
+                    "and never a bridge. "
                     "Do not add objects, counts, or causes that are not in the JSON. "
-                    "Say that the deck-line changes are a 15-second sample, "
+                    "Say that the changes along the long return "
+                    "are a 15-second sample, "
                     "not a congestion class."
                 ),
             },
@@ -1031,9 +1034,10 @@ def model_briefing(scene: dict[str, object]) -> str | None:
                     "Write the briefing in this order, as prose, "
                     "using only these numbers.\n"
                     "1. Water area, scene area, water fraction, water sigma0, "
-                    "then each basin area and its median sigma0.\n"
-                    "2. Deck length, width, and peak_sigma0_db. "
-                    "Say the deck-line changes are a 15-second sample, "
+                    "then each water-component area and its median sigma0.\n"
+                    "2. The long bright return's length_m, width_m, "
+                    "and peak_sigma0_db. "
+                    "Say the changes along that line are a 15-second sample, "
                     "not a congestion class.\n"
                     f"3. Exactly {moved} moving returns. "
                     "For each one give coordinates, "

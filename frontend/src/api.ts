@@ -96,6 +96,13 @@ export async function fetchLibrary(): Promise<LibraryResponse> {
   return requestJson<LibraryResponse>("/api/library")
 }
 
+export async function clearDemoData(): Promise<{
+  cleared: boolean
+  note: string
+}> {
+  return requestJson("/api/demo/clear", { method: "POST" })
+}
+
 export async function fetchCatalog(
   path: string
 ): Promise<CatalogSearchResponse> {

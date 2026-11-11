@@ -67,17 +67,17 @@ function MeasurementView({
           detail={waterDetail(sceneArea, waterFraction)}
         />
         <Stat
-          label="Basin 1"
+          label="Water component 1"
           value={formatMeasure(basins[0]?.area_km2, "km2")}
           detail={basinDetail(basins[0]?.median_sigma0_db)}
         />
         <Stat
-          label="Basin 2"
+          label="Water component 2"
           value={formatMeasure(basins[1]?.area_km2, "km2")}
           detail={basinDetail(basins[1]?.median_sigma0_db)}
         />
         <Stat
-          label="Deck length"
+          label="Long return"
           value={formatMeasure(measurement.bridge?.length_m, "m")}
           detail={`Width ${formatMeasure(measurement.bridge?.width_m, "m")}, bright return with layover, not roadway width.`}
         />

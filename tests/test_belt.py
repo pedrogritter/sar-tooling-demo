@@ -13,9 +13,25 @@ import numpy as np
 import tifffile
 
 from scene.belt.catalog import tools_for_scene
-from scene.belt.measure import change_masks, split_roughness, water_mask
+from scene.belt.geometry import INCIDENCE_TOLERANCE, Grid, warp_affine
+from scene.belt.measure import (
+    built_up_mask,
+    change_masks,
+    long_structure,
+    split_roughness,
+    track_returns,
+    water_mask,
+    waterline_returns,
+)
 from scene.belt.run import run_tool
-from scene.belt.stack import dark_anomaly, persistence
+from scene.belt.stack import (
+    dark_anomaly,
+    date_of_change,
+    persistence,
+    sea_state,
+    shoreline,
+    site_activity,
+)
 
 
 class WaterAndChangeTest(unittest.TestCase):
@@ -27,8 +43,8 @@ class WaterAndChangeTest(unittest.TestCase):
         calm, rough, note = split_roughness(
             np.full((20, 20), -16.0), np.ones((20, 20), dtype=bool)
         )
-        self.assertFalse(calm.any())
-        self.assertTrue(rough.any())
+        self.assertTrue(calm.any())
+        self.assertFalse(rough.any())
         self.assertIn("one class", note)
 
     def test_change_under_one_and_a_half_db_stays_gray(self) -> None:
@@ -41,6 +57,14 @@ class WaterAndChangeTest(unittest.TestCase):
         self.assertTrue(brighter[:, 4:].all())
         self.assertFalse(darker[:, 2:4].any())
         self.assertFalse(brighter[:, 2:4].any())
+
+        speckled = np.zeros((12, 12), dtype=np.float32)
+        later_speckle = speckled.copy()
+        later_speckle[0, 0] = 10.0
+        later_speckle[2:8, 2:8] = 2.0
+        faint_dark, faint_bright = change_masks(speckled, later_speckle)
+        self.assertFalse(faint_dark.any())
+        self.assertFalse(faint_bright.any())
 
     def test_anomaly_is_darker_than_the_stack_median(self) -> None:
         frame = np.full((30, 30), -12.0, dtype=np.float32)
@@ -218,6 +242,265 @@ class PairLockTest(unittest.TestCase):
             self.assertTrue(change.is_file())
             self.assertTrue(persistence.is_file())
             self.assertTrue(anomaly.is_file())
+
+
+class StackToolTest(unittest.TestCase):
+    def test_a_uniformly_dark_sea_is_not_an_anomaly_and_the_shore_is_the_edge(
+        self,
+    ) -> None:
+        frame = np.full((20, 20), -20.0, dtype=np.float32)
+        median = np.full((20, 20), -12.0, dtype=np.float32)
+        water = np.ones((20, 20), dtype=bool)
+        self.assertFalse(dark_anomaly(frame, median, water).any())
+
+        mask = np.zeros((8, 8), dtype=bool)
+        mask[2:6, 2:6] = True
+        edge = shoreline(mask)
+        self.assertTrue(edge[2, 2])
+        self.assertFalse(edge[3, 3])
+        self.assertFalse(edge[0, 0])
+
+        levels = sea_state(
+            [np.full((4, 4), -15.0, dtype=np.float32), np.zeros((4, 4))],
+            [np.ones((4, 4), dtype=bool), np.zeros((4, 4), dtype=bool)],
+        )
+        self.assertEqual(levels[0], -15.0)
+        self.assertIsNone(levels[1])
+
+    def test_date_of_change_ignores_a_speck_and_a_two_db_shift(self) -> None:
+        frames = [np.zeros((12, 12), dtype=np.float32) for _ in range(3)]
+        frames[1] = frames[1].copy()
+        frames[1][0, 0] = 10.0
+        frames[2] = frames[2].copy()
+        frames[2][2:8, 2:8] = 4.0
+        which, keep = date_of_change(frames)
+        self.assertFalse(keep[0, 0])
+        self.assertEqual(int(which[0, 0]), -1)
+        self.assertTrue(keep[4, 4])
+        self.assertEqual(int(which[4, 4]), 2)
+
+    def test_site_activity_names_a_new_cluster_and_not_a_single_pixel(self) -> None:
+        frame = np.full((12, 12), -20.0, dtype=np.float32)
+        median = frame.copy()
+        frame[2:6, 2:6] = -8.0
+        frame[0, 11] = -8.0
+        appeared, left = site_activity(frame, median, -18.0)
+        self.assertTrue(appeared[3, 3])
+        self.assertFalse(appeared[0, 11])
+        self.assertFalse(left.any())
+
+
+class SingleSceneTest(unittest.TestCase):
+    def test_land_majority_keeps_the_dark_peak_and_a_flat_field_does_not_split(
+        self,
+    ) -> None:
+        db = np.full((40, 40), -5.0, dtype=np.float32)
+        db[:16, :16] = -18.0
+        water, mode = water_mask(db)
+        self.assertLess(mode, -12.0)
+        self.assertGreater(int(water[:16, :16].sum()), int(water[16:, 16:].sum()))
+
+        split = np.full((20, 20), -10.0, dtype=np.float32)
+        split[:, :10] = -20.0
+        calm, rough, note = split_roughness(split, np.ones((20, 20), dtype=bool))
+        self.assertTrue(calm[:, :10].all())
+        self.assertTrue(rough[:, 10:].all())
+        self.assertIn("median", note)
+        self.assertNotIn("wave", note.lower())
+
+    def test_a_hull_is_not_built_up_and_a_dim_land_pixel_is_not_either(self) -> None:
+        water = np.zeros((40, 40), dtype=bool)
+        water[:, :10] = True
+        db = np.full((40, 40), -14.0, dtype=np.float32)
+        db[water] = 0.0
+        db[5:12, 20:28] = -8.0
+        built = built_up_mask(db, water, -18.0)
+        self.assertTrue(built[8, 24])
+        self.assertFalse(built[5, 5])
+        self.assertFalse(built[0, 30])
+
+    def test_a_bright_return_must_touch_the_water_and_a_short_one_is_not_long(
+        self,
+    ) -> None:
+        db = np.full((40, 80), -16.0, dtype=np.float32)
+        water = np.zeros(db.shape, dtype=bool)
+        water[:, :6] = True
+        db[water] = -18.0
+        db[8:12, 6:10] = -2.0
+        db[8:12, 60:64] = -2.0
+        found = waterline_returns(db, water, -18.0, 5.0, 5.0)
+        self.assertEqual(len(found), 1)
+        self.assertLess(found[0].col, 20)
+
+        db[:, 6:9] = -2.0
+        structure = long_structure(db, water, -18.0, 5.0, 5.0)
+        self.assertIsNotNone(structure)
+        assert structure is not None
+        self.assertGreater(structure.length_m, 200)
+
+        short = np.full((40, 80), -16.0, dtype=np.float32)
+        short_water = np.zeros(short.shape, dtype=bool)
+        short_water[:, :6] = True
+        short[10:14, 6:10] = -2.0
+        self.assertIsNone(long_structure(short, short_water, -18.0, 5.0, 5.0))
+
+    def test_a_dwell_track_is_motion_during_the_stare_not_a_route(self) -> None:
+        moving = np.zeros((5, 20, 20), dtype=np.float32)
+        for index in range(5):
+            moving[index, 8, 4 + index] = 100
+        moved = track_returns(moving, [(8.0, 4.0)], 1.0, 1.0, 10.0, 10.0)
+        self.assertEqual(moved[0]["motion"], "moved")
+        self.assertGreater(float(moved[0]["displacement_m"]), 20)
+        self.assertNotIn("route", str(moved[0]["motion"]))
+
+        still = np.zeros((5, 20, 20), dtype=np.float32)
+        still[:, 8, 4] = 100
+        stayed = track_returns(still, [(8.0, 4.0)], 1.0, 1.0, 10.0, 10.0)
+        self.assertEqual(stayed[0]["motion"], "stationary during the dwell")
+
+    def test_open_water_record_keeps_the_shadow_limit(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            root = Path(raw)
+            scene_id = "ICEYE_TEST_20260211T000000Z_1_X1_SM"
+            OpenWaterPictureTest()._write_scene(root, scene_id, dark=True)
+            with (
+                patch("scene.belt.catalog.scene_dir", _rooted(root)),
+                patch("scene.belt.run.scene_dir", _rooted(root)),
+            ):
+                run_tool(scene_id, "open-water", lambda _index, _sentence: None)
+                run_tool(scene_id, "sea-roughness", lambda _index, _sentence: None)
+            water = json.loads(
+                (
+                    root
+                    / "scenes"
+                    / scene_id
+                    / "analysis"
+                    / "open-water"
+                    / "measurements.json"
+                ).read_text(encoding="utf-8")
+            )
+            rough = json.loads(
+                (
+                    root
+                    / "scenes"
+                    / scene_id
+                    / "analysis"
+                    / "sea-roughness"
+                    / "measurements.json"
+                ).read_text(encoding="utf-8")
+            )
+        self.assertIn("Shadow", water["limit"])
+        self.assertNotIn("ship", water["limit"].lower())
+        self.assertIn("not a wave", rough["limit"])
+        labels = {row["label"]: row["value"] for row in rough["summary"]}
+        self.assertEqual(labels["Split"], "none")
+
+
+class EligibilityTest(unittest.TestCase):
+    def test_scan_and_scan_wide_stay_locked(self) -> None:
+        for mode in ("scan", "scan_wide"):
+            with self.subTest(mode=mode):
+                reason = self._open_water_reason(mode=mode)
+                self.assertIn("not radiometrically calibrated", reason)
+
+    def test_missing_calibration_factor_stays_locked(self) -> None:
+        reason = self._open_water_reason(drop_factor=True)
+        self.assertIn("no calibration factor", reason)
+
+    def test_pair_refuses_a_different_look_a_wide_incidence_and_a_small_overlap(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            root = Path(raw)
+            first = "ICEYE_A_20260211T000000Z_1_X1_SM"
+            second = "ICEYE_B_20260212T000000Z_1_X1_SM"
+            writer = OpenWaterPictureTest()
+            writer._write_scene(root, first, dark=True)
+            writer._write_scene(root, second, dark=False)
+            self._patch_stac(
+                root,
+                second,
+                {"sar:observation_direction": "left"},
+            )
+            self.assertNotIn(second, self._partners(root, first))
+
+            self._patch_stac(
+                root,
+                second,
+                {
+                    "sar:observation_direction": "right",
+                    "view:incidence_angle": 26.0 + INCIDENCE_TOLERANCE + 0.2,
+                },
+            )
+            views = self._views(root, first)
+            self.assertNotIn(second, views["amplitude-change"].partners)
+            self.assertIn("within 1 degree", views["amplitude-change"].reason)
+
+            self._patch_stac(
+                root,
+                second,
+                {"view:incidence_angle": 26.0 + INCIDENCE_TOLERANCE},
+                bbox=[-16.7, 28.2, -16.4, 28.5],
+            )
+            self.assertNotIn(second, self._partners(root, first))
+
+            self._patch_stac(
+                root,
+                second,
+                {"view:incidence_angle": 26.0},
+                bbox=[-16.9, 28.0, -16.6, 28.3],
+            )
+            self.assertIn(second, self._partners(root, first))
+
+    def test_warp_lands_a_shifted_pixel_on_the_destination_grid(self) -> None:
+        source = Grid(0.0, 0.001, 0.0, 0.0, 0.0, -0.001)
+        destination = Grid(0.002, 0.001, 0.0, 0.0, 0.0, -0.001)
+        values = np.zeros((4, 6), dtype=np.float32)
+        values[0, 2] = 9.0
+        warped = np.asarray(
+            warp_affine(values, source, 1.0, (4, 6), destination, 1.0)
+        )
+        self.assertAlmostEqual(float(warped[0, 0]), 9.0, places=4)
+        self.assertTrue(np.isnan(warped[0, 5]))
+
+    def _open_water_reason(
+        self, mode: str = "stripmap", drop_factor: bool = False
+    ) -> str:
+        with tempfile.TemporaryDirectory() as raw:
+            root = Path(raw)
+            scene_id = "ICEYE_TEST_20260211T000000Z_1_X1_SM"
+            OpenWaterPictureTest()._write_scene(root, scene_id, dark=True, mode=mode)
+            if drop_factor:
+                path = root / "scenes" / scene_id / "grd-json.json"
+                payload = json.loads(path.read_text(encoding="utf-8"))
+                del payload["properties"]["iceye:calibration_factor"]
+                path.write_text(json.dumps(payload), encoding="utf-8")
+            with patch("scene.belt.catalog.scene_dir", _rooted(root)):
+                views = {item.id: item for item in tools_for_scene(scene_id)}
+            view = views["open-water"]
+            self.assertTrue(view.locked)
+            return view.reason
+
+    def _partners(self, root: Path, scene_id: str) -> tuple[str, ...]:
+        return self._views(root, scene_id)["amplitude-change"].partners
+
+    def _views(self, root: Path, scene_id: str):
+        with patch("scene.belt.catalog.scene_dir", _rooted(root)):
+            return {item.id: item for item in tools_for_scene(scene_id)}
+
+    def _patch_stac(
+        self,
+        root: Path,
+        scene_id: str,
+        properties: dict[str, object],
+        bbox: list[float] | None = None,
+    ) -> None:
+        path = root / "scenes" / scene_id / "stac.json"
+        payload = json.loads(path.read_text(encoding="utf-8"))
+        payload["properties"].update(properties)
+        if bbox is not None:
+            payload["bbox"] = bbox
+        path.write_text(json.dumps(payload), encoding="utf-8")
 
 
 if __name__ == "__main__":

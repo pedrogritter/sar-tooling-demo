@@ -7,7 +7,9 @@ from dataclasses import dataclass
 from scene.grid import Grid
 
 CALIBRATED_MODES = frozenset({"spotlight", "stripmap"})
-INCIDENCE_TOLERANCE = 6.0
+# X-band VV sea sigma-nought can fall by about a decibel per degree of
+# incidence between 26° and 34°. A wider window would look like change.
+INCIDENCE_TOLERANCE = 1.0
 MIN_OVERLAP = 0.3
 
 

@@ -1,7 +1,7 @@
 import { Moon, Radar, Sun } from "lucide-react"
 import { useCallback, useEffect, useState } from "react"
 
-import { fetchDownload, fetchLibrary, fetchSceneById } from "@/api"
+import { clearDemoData, fetchDownload, fetchLibrary, fetchSceneById } from "@/api"
 import { CatalogPanel } from "@/catalog/CatalogPanel"
 import { DownloadDock } from "@/catalog/DownloadDock"
 import { LibraryPanel } from "@/catalog/LibraryPanel"
@@ -9,9 +9,11 @@ import { Button } from "@/components/ui/button"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { useTheme } from "@/components/theme-provider"
 import { AnalysisPane } from "@/scene/AnalysisPane"
+import { demoBannerVisible } from "@/scene/placeholder"
 import { ImageStage } from "@/scene/ImageStage"
 import { MetadataOverlay } from "@/scene/MetadataOverlay"
 import { ToolPicker } from "@/scene/ToolPicker"
+import { stageFor, type StageSource } from "@/scene/stage"
 import { isAnalysisTool, selectTool, toolById, type ToolId } from "@/scene/tools"
 import type {
   DownloadSnapshot,
@@ -25,11 +27,6 @@ const EMPTY_RESULT: JobResult = {
   briefing_html: null,
   overview_url: null,
 }
-
-type StageSource = "quicklook" | "thumbnail" | "video"
-
-const QUICKLOOK_LABEL =
-  "Quicklook. Product orientation, not a map and not a detection layer."
 
 /**
  * Canvas shell. One tool column, the stage, and a single pane for the
@@ -49,6 +46,8 @@ export function ScenePage() {
   const [download, setDownload] = useState<DownloadSnapshot | null>(null)
   const [dockExpanded, setDockExpanded] = useState(false)
   const [downloadWatch, setDownloadWatch] = useState(0)
+  const [clearingDemo, setClearingDemo] = useState(false)
+  const [clearError, setClearError] = useState<string | null>(null)
 
   const loadLibrary = useCallback(async () => {
     setLibraryLoading(true)
@@ -89,6 +88,24 @@ export function ScenePage() {
     },
     [openScene]
   )
+
+  const clearDemo = useCallback(async () => {
+    const sceneId = scene?.scene_id
+    setClearingDemo(true)
+    setClearError(null)
+
+    try {
+      await clearDemoData()
+      await loadLibrary()
+      if (sceneId) {
+        await openScene(sceneId)
+      }
+    } catch (error) {
+      setClearError(messageFrom(error))
+    } finally {
+      setClearingDemo(false)
+    }
+  }, [loadLibrary, openScene, scene?.scene_id])
 
   useEffect(() => {
     let active = true
@@ -196,6 +213,28 @@ export function ScenePage() {
         </div>
         <ThemeToggle />
       </header>
+      {demoBannerVisible(scene) ? (
+        <div className="flex flex-wrap items-center gap-3 border-b bg-muted px-3 py-2">
+          <p className="min-w-0 flex-1 text-sm">
+            {scene?.placeholder_note ??
+              "Demo placeholder. These pictures and numbers were not measured from an ICEYE raster."}
+          </p>
+          <Button
+            type="button"
+            variant="outline"
+            size="xs"
+            disabled={clearingDemo}
+            onClick={() => {
+              void clearDemo()
+            }}
+          >
+            {clearingDemo ? "Clearing demo data" : "Clear demo data"}
+          </Button>
+          {clearError ? (
+            <p className="w-full text-sm text-destructive">{clearError}</p>
+          ) : null}
+        </div>
+      ) : null}
 
       <div className="flex min-h-0 flex-1 flex-col md:flex-row">
         <ToolPicker
@@ -268,6 +307,7 @@ export function ScenePage() {
             {tool && isAnalysisTool(tool) ? (
               <ScrollArea className="flex-1">
                 <AnalysisPane
+                  key={`${tool}:${scene?.placeholder ? "demo" : "scene"}`}
                   sceneId={scene?.scene_id ?? null}
                   toolId={tool}
                   description={selected.description}
@@ -365,61 +405,6 @@ function PreviewPane({
       ))}
     </div>
   )
-}
-
-function stageFor(
-  tool: ToolId | null,
-  source: StageSource,
-  scene: SceneResponse | null,
-  loading: boolean,
-  results: JobResult
-) {
-  const overview =
-    tool && isAnalysisTool(tool) ? results.overview_url : null
-
-  if (overview) {
-    return {
-      loading: false,
-      media: "image" as const,
-      src: overview,
-      alt: "Analysis picture with its legend",
-      label: "Analysis picture. The legend is part of the image.",
-      emptyMessage: "",
-    }
-  }
-
-  if (source === "video" && scene?.video_url) {
-    return {
-      loading: false,
-      media: "video" as const,
-      src: scene.video_url,
-      alt: `Dwell video of ${scene.scene_id}`,
-      label: "Dwell video from the scene folder.",
-      emptyMessage: "",
-    }
-  }
-
-  if (source === "thumbnail" && scene?.thumbnail_url) {
-    return {
-      loading,
-      media: "image" as const,
-      src: scene.thumbnail_url,
-      alt: scene ? `Thumbnail of ${scene.scene_id}` : "Thumbnail",
-      label: "Thumbnail.",
-      emptyMessage: "The thumbnail is not on disk.",
-    }
-  }
-
-  return {
-    loading,
-    media: "image" as const,
-    src: scene?.preview_url ?? null,
-    alt: scene ? `SAR quicklook of ${scene.scene_id}` : "SAR quicklook",
-    label: QUICKLOOK_LABEL,
-    emptyMessage: scene
-      ? "This scene has no quicklook on disk. Download the preview pack from the catalog."
-      : "Select a downloaded scene from the library.",
-  }
 }
 
 function ThemeToggle() {

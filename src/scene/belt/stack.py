@@ -7,7 +7,7 @@ from typing import cast
 import numpy as np
 from scipy import ndimage
 
-from scene.belt.measure import CHANGE_DB, water_mask, waterline_returns
+from scene.belt.measure import CHANGE_DB, change_masks, water_mask, waterline_returns
 
 
 def persistence(masks: list[np.ndarray]) -> np.ndarray:
@@ -67,7 +67,8 @@ def shoreline(mask: np.ndarray) -> np.ndarray:
 def date_of_change(frames: list[np.ndarray]) -> tuple[np.ndarray, np.ndarray]:
     """Index of the date furthest from the stack median, and whether it counts.
 
-    A departure under 1.5 dB stays unlabeled. The index is -1 there.
+    A departure under 3 dB stays unlabeled, as does a patch under 8 pixels.
+    The index is -1 there.
     """
 
     stack = np.stack(frames, axis=0)
@@ -76,7 +77,8 @@ def date_of_change(frames: list[np.ndarray]) -> tuple[np.ndarray, np.ndarray]:
     distance[~np.isfinite(distance)] = -1
     which = np.argmax(distance, axis=0).astype(np.int16)
     peak = distance.max(axis=0)
-    keep = peak >= CHANGE_DB
+    # Reuse the amplitude-change support rule so one speckled pixel is unlabeled.
+    keep = change_masks(median, median + np.where(peak >= CHANGE_DB, peak, 0))[1]
     which = np.where(keep, which, -1)
     return which, keep
 

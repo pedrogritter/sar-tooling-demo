@@ -53,6 +53,9 @@ export function LibraryPanel({
               >
                 <span className="flex flex-wrap items-center gap-1">
                   {scene.is_test_scene ? <Badge>Test scene</Badge> : null}
+                  {scene.placeholder ? (
+                    <Badge variant="outline">Demo data</Badge>
+                  ) : null}
                   <Badge variant="outline">{scene.mode}</Badge>
                 </span>
                 <span className="font-mono text-[0.65rem] break-all">

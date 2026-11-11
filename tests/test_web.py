@@ -11,8 +11,11 @@ import urllib.error
 import urllib.request
 from http.server import ThreadingHTTPServer
 from pathlib import Path
+from unittest.mock import patch
 
+from scene.jobs import MeasurementJobManager
 from scene.web import AppState, build_state, dispatch, make_handler
+from tests.test_belt import OpenWaterPictureTest, _rooted
 
 SCENE_ID = "ICEYE_EYCKP5_20251024T135309Z_6724574_X52_SLF"
 
@@ -90,6 +93,124 @@ class DispatchTest(unittest.TestCase):
             catalog=catalog,
         )
         self.assertEqual(bad.status, 400)
+        for query in ("bbox=nan,0,1,2", "bbox=1,1,0,2"):
+            with self.subTest(query=query):
+                rejected = dispatch(
+                    "GET",
+                    f"/api/catalog/search?{query}",
+                    b"",
+                    self.state,
+                    catalog=catalog,
+                )
+                self.assertEqual(rejected.status, 400)
+
+
+class AnalysisRouteTest(unittest.TestCase):
+    def test_unknown_locked_and_missing_partner_are_refused(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            root = Path(raw)
+            writer = OpenWaterPictureTest()
+            first = "ICEYE_A_20260211T000000Z_1_X1_SM"
+            second = "ICEYE_B_20260212T000000Z_1_X1_SM"
+            scan = "ICEYE_C_20260211T000000Z_1_X1_SC"
+            writer._write_scene(root, first, dark=True)
+            writer._write_scene(root, second, dark=False)
+            writer._write_scene(root, scan, dark=True, mode="scan")
+            rooted = _rooted(root)
+            with (
+                patch("scene.web.scene_dir", rooted),
+                patch("scene.belt.catalog.scene_dir", rooted),
+            ):
+                unknown = self._post(first, "not-a-tool")
+                self.assertEqual(unknown.status, 400)
+                self.assertIn(b"Unknown tool", unknown.body)
+
+                locked = self._post(scan, "open-water")
+                self.assertEqual(locked.status, 400)
+                self.assertIn(b"not radiometrically calibrated", locked.body)
+
+                missing = self._post(first, "amplitude-change")
+                self.assertEqual(missing.status, 400)
+                self.assertIn(b"Choose a second scene", missing.body)
+
+                stranger = self._post(first, "amplitude-change", partner_id=scan)
+                self.assertEqual(stranger.status, 400)
+                self.assertIn(b"Choose a second scene", stranger.body)
+
+    def test_second_analysis_is_refused_while_one_is_running(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            root = Path(raw)
+            scene_id = "ICEYE_A_20260211T000000Z_1_X1_SM"
+            OpenWaterPictureTest()._write_scene(root, scene_id, dark=True)
+            rooted = _rooted(root)
+            manager = MeasurementJobManager()
+            started = threading.Event()
+            release = threading.Event()
+
+            def block(*_args: object, **_kwargs: object) -> None:
+                started.set()
+                self.assertTrue(release.wait(timeout=3))
+
+            try:
+                with (
+                    patch("scene.web.scene_dir", rooted),
+                    patch("scene.belt.catalog.scene_dir", rooted),
+                    patch("scene.belt.run.run_tool", block),
+                ):
+                    first = self._post(scene_id, "open-water", manager)
+                    self.assertEqual(first.status, 202)
+                    self.assertTrue(started.wait(timeout=2))
+                    second = self._post(scene_id, "open-water", manager)
+                    self.assertEqual(second.status, 409)
+            finally:
+                release.set()
+                thread = manager._thread
+                if thread is not None:
+                    thread.join(timeout=3)
+
+    def test_analysis_png_does_not_follow_a_link_out_of_the_scene(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            root = Path(raw)
+            scene_id = "ICEYE_A_20260211T000000Z_1_X1_SM"
+            OpenWaterPictureTest()._write_scene(root, scene_id, dark=True)
+            folder = root / "scenes" / scene_id / "analysis" / "open-water"
+            folder.mkdir(parents=True)
+            overview = folder / "overview.png"
+            overview.write_bytes(b"inside-png")
+            outside = root / "secret.png"
+            outside.write_bytes(b"secret-bytes")
+            rooted = _rooted(root)
+            url = f"/api/scenes/{scene_id}/analysis/open-water/overview.png"
+            with (
+                patch("scene.web.scene_dir", rooted),
+                patch("scene.belt.catalog.scene_dir", rooted),
+            ):
+                served = dispatch("GET", url, b"", build_state())
+                self.assertEqual(served.status, 200)
+                self.assertEqual(served.body, b"inside-png")
+                overview.unlink()
+                overview.symlink_to(outside)
+                escaped = dispatch("GET", url, b"", build_state())
+            self.assertEqual(escaped.status, 404)
+            self.assertNotIn(b"secret-bytes", escaped.body)
+
+    def _post(
+        self,
+        scene_id: str,
+        tool_id: str,
+        manager: MeasurementJobManager | None = None,
+        partner_id: str | None = None,
+    ):
+        payload: dict[str, str] = {"scene_id": scene_id, "tool_id": tool_id}
+        if partner_id is not None:
+            payload["partner_id"] = partner_id
+        return dispatch(
+            "POST",
+            "/api/jobs/run",
+            json.dumps(payload).encode("utf-8"),
+            build_state(),
+            job_manager=manager,
+        )
 
 
 class ServerTest(unittest.TestCase):

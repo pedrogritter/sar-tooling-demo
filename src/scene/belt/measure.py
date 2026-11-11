@@ -13,7 +13,11 @@ from typing import cast
 import numpy as np
 from scipy import ndimage
 
-CHANGE_DB = 1.5
+# 3 dB is a factor of two. A 1-look intensity pixel has a spread of about
+# 5.6 dB, so a 1.5 dB gate paints speckle. Patches smaller than
+# CHANGE_SUPPORT pixels are dropped for the same reason.
+CHANGE_DB = 3.0
+CHANGE_SUPPORT = 8
 
 
 @dataclass(frozen=True)
@@ -28,19 +32,22 @@ class Component:
 
 
 def water_mask(db: np.ndarray) -> tuple[np.ndarray, float]:
-    """Dark, smooth, connected water and the decibel level of that dark peak."""
+    """Dark, smooth, connected water and the decibel level of that dark peak.
+
+    The peak is the darkest histogram mode, not the most common brightness.
+    A land-majority scene would otherwise adopt the land level and paint
+    the land as water. A dark smooth surface that is not water (shadow,
+    tarmac, sand) still passes: the limit sentence says so.
+    """
 
     smooth = ndimage.uniform_filter(db, size=5)
     finite = smooth[np.isfinite(smooth)]
     if finite.size == 0:
         return np.zeros(db.shape, dtype=bool), -99.0
-    low = float(np.percentile(finite, 1))
-    high = float(np.percentile(finite, 80))
-    hist, edges = np.histogram(finite, bins=64, range=(low, max(high, low + 1)))
-    peak = int(np.argmax(hist))
-    mode = float((edges[peak] + edges[peak + 1]) / 2)
+    mode = _dark_peak(finite)
     deviation = _local_deviation(db, smooth)
-    speckle = float(np.median(deviation[np.abs(smooth - mode) <= 1.5]))
+    near = np.abs(smooth - mode) <= 1.5
+    speckle = float(np.median(deviation[near])) if np.any(near) else 1.0
     if not np.isfinite(speckle) or speckle <= 0:
         speckle = 1.0
     dark = (smooth <= mode + 1.5) & (deviation <= speckle * 2.0) & np.isfinite(db)
@@ -65,9 +72,8 @@ def split_roughness(
         )
     spread = float(np.percentile(values, 90) - np.percentile(values, 10))
     if spread < 1.5:
-        rough = water.copy()
         return (
-            calm,
+            water.copy(),
             rough,
             "The water spans less than 1.5 dB, so it is drawn as one class.",
         )
@@ -207,13 +213,46 @@ def track_returns(
 def change_masks(
     earlier: np.ndarray, later: np.ndarray
 ) -> tuple[np.ndarray, np.ndarray]:
-    """Later-darker and later-brighter masks. A change under 1.5 dB stays gray."""
+    """Later-darker and later-brighter masks.
+
+    A difference under 3 dB stays gray, and so does a patch under 8 pixels.
+    """
 
     delta = later - earlier
     valid = np.isfinite(earlier) & np.isfinite(later)
     darker = valid & (delta <= -CHANGE_DB)
     brighter = valid & (delta >= CHANGE_DB)
-    return darker, brighter
+    return _supported(darker), _supported(brighter)
+
+
+def _supported(mask: np.ndarray) -> np.ndarray:
+    """Drop a change patch smaller than ``CHANGE_SUPPORT`` pixels."""
+
+    labels, count = ndimage.label(mask)
+    if count == 0:
+        return np.zeros(mask.shape, dtype=bool)
+    counts = np.bincount(labels.ravel())
+    keep = counts >= CHANGE_SUPPORT
+    keep[0] = False
+    return cast(np.ndarray, keep[labels])
+
+
+def _dark_peak(values: np.ndarray) -> float:
+    """Centre of the darkest histogram mode that holds at least 0.5 percent."""
+
+    low = float(np.percentile(values, 1))
+    high = float(np.percentile(values, 99))
+    if high <= low:
+        return float(np.median(values))
+    hist, edges = np.histogram(values, bins=64, range=(low, high))
+    minimum = 0.005 * float(values.size)
+    for index, count in enumerate(hist):
+        left = hist[index - 1] if index else -1
+        right = hist[index + 1] if index + 1 < hist.size else -1
+        if count >= left and count >= right and count >= minimum:
+            return float((edges[index] + edges[index + 1]) / 2)
+    peak = int(np.argmax(hist))
+    return float((edges[peak] + edges[peak + 1]) / 2)
 
 
 def _local_deviation(db: np.ndarray, smooth: np.ndarray) -> np.ndarray:

@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 import logging
+import math
 import mimetypes
 import re
 from dataclasses import dataclass
@@ -29,6 +30,7 @@ from .catalog import (
     is_large_asset,
     record_public,
 )
+from .demo import PlaceholderMissing, clear_placeholder, note_from_folder
 from .downloads import (
     DownloadAlreadyRunningError,
     DownloadError,
@@ -276,6 +278,7 @@ def _scene_document(
     graphic = scene.asset("graphic")
     video = scene.asset("vid-mp4")
     scene_id = scene.scene_id
+    note = note_from_folder(scene_dir(scene_id))
     return {
         "scene_id": scene_id,
         "collected_at": scene.collected_at,
@@ -301,6 +304,8 @@ def _scene_document(
         ),
         "assets_on_disk": [asset.key for asset in scene.assets if asset.on_disk],
         "is_test_scene": scene_id == LISBON_SCENE_ID,
+        "placeholder": note is not None,
+        "placeholder_note": note,
         "measurement": result["measurement"],
         "briefing_html": result["briefing_html"],
         "overview_url": result["overview_url"],
@@ -320,6 +325,8 @@ def _dispatch_workspace(
     path = urlsplit(target).path
     if path == "/api/library" and method == "GET":
         return _json(200, {"scenes": list_library()})
+    if path == "/api/demo/clear" and method == "POST":
+        return _clear_demo(body)
     if path == "/api/jobs/run" and method == "POST":
         return _start_analysis(body, manager)
     tools_match = _TOOLS_ROUTE.fullmatch(path)
@@ -353,6 +360,18 @@ def _dispatch_workspace(
             scene_match.group("scene_id"), scene_match.group("leaf"), manager
         )
     return None
+
+
+def _clear_demo(body: bytes) -> HttpResponse:
+    """Remove placeholder pictures. A real scene folder is not deleted."""
+
+    if body:
+        return _plain(400, "Clear demo request body must be empty")
+    try:
+        note = clear_placeholder()
+    except PlaceholderMissing:
+        return _plain(404, "No demo placeholder is on disk")
+    return _json(200, {"cleared": True, "note": note})
 
 
 def _scene_tools(scene_id: str) -> HttpResponse:
@@ -647,6 +666,10 @@ def _query_bbox(raw: str | None) -> tuple[float, float, float, float] | None:
         west, south, east, north = (float(part) for part in parts)
     except ValueError as exc:
         raise ValueError("bbox must be west,south,east,north") from exc
+    if not all(math.isfinite(value) for value in (west, south, east, north)):
+        raise ValueError("bbox must be west,south,east,north")
+    if west >= east or south >= north:
+        raise ValueError("bbox must be west,south,east,north")
     return west, south, east, north
 
 
@@ -800,7 +823,11 @@ def make_handler(
             raw = self.headers.get("Content-Length")
             if raw is None:
                 path = urlsplit(target).path
-                if path in {"/api/jobs/measure", "/api/catalog/refresh"}:
+                if path in {
+                    "/api/jobs/measure",
+                    "/api/catalog/refresh",
+                    "/api/demo/clear",
+                }:
                     return 0
                 return None
             try:

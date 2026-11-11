@@ -1,0 +1,17 @@
+.git
+.venv
+**/__pycache__
+**/*.pyc
+.mypy_cache
+.ruff_cache
+**/*.egg-info
+.env
+.env.*
+data
+intelligence
+frontend/node_modules
+frontend/dist
+frontend/coverage
+demo/seed
+HANDOFF.md
+.cursorignore

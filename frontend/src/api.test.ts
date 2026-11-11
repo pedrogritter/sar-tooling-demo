@@ -3,6 +3,7 @@ import {
   MeasureJobConflictError,
   fetchCurrentJob,
   fetchScene,
+  startAnalysisJob,
   startMeasureJob,
 } from "@/api"
 
@@ -26,6 +27,45 @@ describe("scene api", () => {
 
     await expect(fetchScene()).resolves.toEqual({ scene_id: "ICEYE" })
     expect(fetchMock).toHaveBeenCalledWith("/api/scene", undefined)
+  })
+
+  it("posts the scene, the tool, and the partner", async () => {
+    fetchMock.mockResolvedValue(
+      jsonResponse({ job_id: "job-1", status: "running" }, 202)
+    )
+
+    await startAnalysisJob("ICEYE_TEST", "amplitude-change", "ICEYE_OTHER")
+
+    expect(fetchMock).toHaveBeenCalledWith("/api/jobs/run", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        scene_id: "ICEYE_TEST",
+        tool_id: "amplitude-change",
+        partner_id: "ICEYE_OTHER",
+      }),
+    })
+  })
+
+  it("sends a null partner when the tool does not need one", async () => {
+    fetchMock.mockResolvedValue(
+      jsonResponse({ job_id: "job-2", status: "running" }, 202)
+    )
+
+    await startAnalysisJob("ICEYE_TEST", "open-water", null)
+
+    const body = JSON.parse(String(fetchMock.mock.calls[0][1].body)) as {
+      partner_id: string | null
+    }
+    expect(body.partner_id).toBeNull()
+  })
+
+  it("turns an analysis 409 into a conflict error", async () => {
+    fetchMock.mockResolvedValue(jsonResponse({ status: "running" }, 409))
+
+    await expect(
+      startAnalysisJob("ICEYE_TEST", "open-water", null)
+    ).rejects.toBeInstanceOf(MeasureJobConflictError)
   })
 
   it("turns HTTP 409 into a conflict error", async () => {

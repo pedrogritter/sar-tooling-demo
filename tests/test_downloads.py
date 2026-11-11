@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import tempfile
 import threading
 import unittest
@@ -87,6 +88,116 @@ class DownloadJobTest(unittest.TestCase):
                 if item["name"] == "graphic.png"
             )
             self.assertEqual(graphic["state"], "kept")
+
+    def test_omitted_asset_list_downloads_the_preview_pack_only(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            root = Path(raw)
+            manager = DownloadManager(
+                _service(root / "index"),
+                fetch_file=_write_five,
+                remote_size=lambda _href: 5,
+                scenes_root=root / "scenes",
+            )
+            manager.start(LISBON, None)
+            manager.wait()
+            done = manager.current()
+            self.assertEqual(done["status"], "done")
+            names = {
+                str(item["name"])
+                for item in cast(list[dict[str, object]], done["files"])
+            }
+            self.assertEqual(names, {"stac.json", "graphic.png"})
+
+    def test_asset_key_cannot_leave_the_scene_folder(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            root = Path(raw)
+            catalog = _service(
+                root / "index",
+                extra_assets={
+                    "../escape": {
+                        "href": "https://iceye-open-data-catalog.s3.amazonaws.com/data/x/escape.bin",
+                        "title": "Escape",
+                        "type": "application/octet-stream",
+                    }
+                },
+            )
+            manager = DownloadManager(
+                catalog,
+                fetch_file=_write_five,
+                remote_size=lambda _href: 5,
+                scenes_root=root / "scenes",
+            )
+            with self.assertRaises(DownloadError):
+                manager.start(LISBON, ["../escape"])
+            self.assertFalse((root / "escape.bin").exists())
+            self.assertEqual(manager.current()["status"], "idle")
+
+    def test_failed_download_leaves_the_placeholder(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            root = Path(raw)
+            folder = root / "scenes" / LISBON
+            analysis = folder / "analysis" / "open-water"
+            analysis.mkdir(parents=True)
+            (folder / "demo.json").write_text(
+                json.dumps({"placeholder": True, "note": "Demo placeholder."}),
+                encoding="utf-8",
+            )
+            (analysis / "overview.png").write_bytes(b"png")
+            (folder / "qlk-cog.tif").write_bytes(b"tif")
+
+            def boom(_href: str, _target: Path) -> str:
+                raise OSError("network down")
+
+            manager = DownloadManager(
+                _service(root / "index"),
+                fetch_file=boom,
+                remote_size=lambda _href: 5,
+                scenes_root=root / "scenes",
+            )
+            manager.start(LISBON, ["graphic"])
+            manager.wait()
+            self.assertEqual(manager.current()["status"], "failed")
+            self.assertTrue((folder / "demo.json").is_file())
+            self.assertTrue((analysis / "overview.png").is_file())
+            self.assertEqual((folder / "qlk-cog.tif").read_bytes(), b"tif")
+            self.assertFalse((root / ".seed-applied").exists())
+
+    def test_successful_download_strips_the_placeholder(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            root = Path(raw)
+            folder = root / "scenes" / LISBON
+            analysis = folder / "analysis" / "open-water"
+            analysis.mkdir(parents=True)
+            (folder / "demo.json").write_text(
+                json.dumps(
+                    {"placeholder": True, "note": "Demo placeholder."}
+                ),
+                encoding="utf-8",
+            )
+            (analysis / "overview.png").write_bytes(b"png")
+            (folder / "qlk-cog.tif").write_bytes(b"tif")
+            manager = DownloadManager(
+                _service(root / "index"),
+                fetch_file=_write_five,
+                remote_size=lambda _href: 5,
+                scenes_root=root / "scenes",
+            )
+            manager.start(LISBON, ["graphic"])
+            manager.wait()
+            self.assertEqual(manager.current()["status"], "done")
+            self.assertFalse((folder / "demo.json").exists())
+            self.assertFalse(analysis.exists())
+            self.assertFalse((folder / "qlk-cog.tif").exists())
+            self.assertEqual((folder / "graphic.png").read_bytes(), b"abcde")
+            self.assertEqual(
+                (root / ".seed-applied").read_text(encoding="utf-8").strip(),
+                "replaced",
+            )
+
+
+def _write_five(_href: str, target: Path) -> str:
+    target.write_bytes(b"abcde")
+    return "done"
 
 
 class CatalogTypeGuard(unittest.TestCase):

@@ -17,6 +17,7 @@ import sys
 from pathlib import Path
 from urllib.request import Request, urlopen
 
+from scene.demo import strip_placeholder
 from scene.naming import local_asset_name
 from scene.paths import scene_dir, valid_scene_id
 from scene.store import migrate_flat_scene
@@ -42,10 +43,14 @@ def main() -> None:
     folder.mkdir(parents=True, exist_ok=True)
     (folder / "stac.json").write_text(json.dumps(item, indent=2), encoding="utf-8")
     names = tuple(item["assets"]) if "--all" in sys.argv[1:] else KEEP
+    written: list[str] = []
     for name in names:
         asset = item["assets"][name]
         target = folder / local_asset_name(name, asset["href"])
         fetch(asset["href"], target)
+        written.append(target.name)
+    # A failed fetch raises before this, so the placeholder stays in place.
+    strip_placeholder(folder, replaced=written)
     props = item["properties"]
     print("scene", item["id"])
     print("when", props["datetime"])
