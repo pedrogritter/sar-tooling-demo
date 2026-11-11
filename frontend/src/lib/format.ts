@@ -35,6 +35,53 @@ export function formatUtc(value: string): string {
     .replace(" at ", ", ")
 }
 
+export function formatFootprintSize(bbox: BoundingBox): string {
+  const [west, south, east, north] = bbox
+  const mid = ((south + north) / 2) * (Math.PI / 180)
+  const height = Math.abs(north - south) * 111
+  const width = Math.abs(east - west) * 111 * Math.cos(mid)
+
+  return `${Math.round(width)} × ${Math.round(height)} km`
+}
+
+export function catalogSummary(item: {
+  acquired_at: string | null
+  satellite: string | null
+  mode: string | null
+  product_code: string | null
+  incidence_angle: number | null
+  bbox: BoundingBox | null
+  orbit: string | null
+  look: string | null
+  has_grd: boolean
+  has_slc: boolean
+  has_video: boolean
+}): string {
+  const assets = [
+    item.has_grd ? "GRD" : null,
+    item.has_slc ? "SLC" : null,
+    item.has_video ? "video" : null,
+  ]
+  const incidence =
+    typeof item.incidence_angle === "number" &&
+    Number.isFinite(item.incidence_angle)
+      ? `${item.incidence_angle.toFixed(1)}°`
+      : null
+
+  return [
+    item.acquired_at,
+    item.satellite,
+    item.mode ?? item.product_code,
+    item.bbox ? formatFootprintSize(item.bbox) : null,
+    incidence,
+    item.orbit,
+    item.look,
+    assets.filter(Boolean).join(", ") || null,
+  ]
+    .filter(Boolean)
+    .join(" · ")
+}
+
 export function formatBbox([west, south, east, north]: BoundingBox): string {
   return `${formatCoordinate(west)}, ${formatCoordinate(south)}, ${formatCoordinate(east)}, ${formatCoordinate(north)}`
 }

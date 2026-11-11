@@ -11,7 +11,7 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { catalogSearchPath, EMPTY_FILTERS, type CatalogFilters } from "@/catalog/search-query"
-import { formatBytes } from "@/lib/format"
+import { catalogSummary, formatBytes } from "@/lib/format"
 import type { CatalogItemDetail, CatalogSearchResponse } from "@/types"
 
 interface CatalogPanelProps {
@@ -231,13 +231,14 @@ export function CatalogPanel({
                   <span className="size-14 shrink-0 bg-neutral-950" />
                 )}
                 <span className="min-w-0">
-                  <span className="block truncate font-mono text-[0.65rem]">
+                  {item.place ? (
+                    <span className="block truncate text-sm">{item.place}</span>
+                  ) : null}
+                  <span className="block truncate font-mono text-[0.65rem] text-muted-foreground">
                     {item.scene_id}
                   </span>
                   <span className="mt-1 block text-xs text-muted-foreground">
-                    {[item.acquired_at, item.satellite, item.mode ?? item.product_code]
-                      .filter(Boolean)
-                      .join(" · ")}
+                    {catalogSummary(item)}
                   </span>
                   {item.on_disk ? (
                     <Badge variant="secondary" className="mt-1">
@@ -289,8 +290,14 @@ export function CatalogPanel({
             ) : null}
             {detail ? (
               <div className="flex flex-col gap-2">
-                <p className="font-mono text-[0.65rem] break-all">
+                {detail.place ? (
+                  <p className="text-sm">{detail.place}</p>
+                ) : null}
+                <p className="font-mono text-[0.65rem] break-all text-muted-foreground">
                   {detail.scene_id}
+                </p>
+                <p className="text-xs text-muted-foreground">
+                  {catalogSummary(detail)}
                 </p>
                 {detail.assets.map((asset) => (
                   <label

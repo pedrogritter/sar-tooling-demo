@@ -9,6 +9,7 @@ from each item JSON in the background. The cache is ``data/catalog-index.json``.
 from __future__ import annotations
 
 import json
+import math
 import threading
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
@@ -19,6 +20,7 @@ from urllib.parse import urljoin, urlsplit
 from urllib.request import Request, urlopen
 
 from .paths import catalog_index_path, valid_scene_id
+from .places import place_name
 
 COLLECTION_URL = (
     "https://iceye-open-data-catalog.s3.amazonaws.com/collections/iceye-sar.json"
@@ -72,6 +74,9 @@ class CatalogRecord:
     mode: str | None = None
     incidence_angle: float | None = None
     bbox: tuple[float, float, float, float] | None = None
+    orbit: str | None = None
+    look: str | None = None
+    place: str | None = None
     thumbnail_href: str | None = None
     assets: tuple[CatalogAsset, ...] = ()
 
@@ -216,6 +221,12 @@ def record_public(record: CatalogRecord, on_disk: bool) -> dict[str, object]:
         "mode": record.mode,
         "incidence_angle": record.incidence_angle,
         "bbox": list(record.bbox) if record.bbox is not None else None,
+        "orbit": record.orbit,
+        "look": record.look,
+        "place": record.place,
+        "has_grd": _has_asset(record, "grd-cog"),
+        "has_slc": _has_asset(record, "slc-cog"),
+        "has_video": _has_asset(record, "vid-cog") or _has_asset(record, "vid-mp4"),
         "cached": record.cached,
         "thumbnail_url": thumbnail,
         "on_disk": on_disk,
@@ -562,7 +573,13 @@ def enrich_record(record: CatalogRecord, payload: dict[str, object]) -> CatalogR
         raw_angle = properties.get("view:incidence_angle")
         if isinstance(raw_angle, (int, float)) and not isinstance(raw_angle, bool):
             incidence = float(raw_angle)
+        orbit = _optional_str(properties.get("sat:orbit_state"))
+        look = _optional_str(properties.get("sar:observation_direction"))
+    else:
+        orbit = None
+        look = None
     assets = _assets_from_item(payload.get("assets"))
+    bbox = _bbox(payload.get("bbox"))
     return CatalogRecord(
         scene_id=record.scene_id,
         href=record.href,
@@ -572,7 +589,10 @@ def enrich_record(record: CatalogRecord, payload: dict[str, object]) -> CatalogR
         cached=True,
         mode=mode,
         incidence_angle=incidence,
-        bbox=_bbox(payload.get("bbox")),
+        bbox=bbox,
+        orbit=orbit,
+        look=look,
+        place=_place_for_bbox(bbox),
         thumbnail_href=_thumbnail_href(payload, assets),
         assets=assets,
     )
@@ -655,6 +675,9 @@ def _snapshot(record: CatalogRecord) -> CatalogRecord:
         mode=record.mode,
         incidence_angle=record.incidence_angle,
         bbox=record.bbox,
+        orbit=record.orbit,
+        look=record.look,
+        place=record.place,
         thumbnail_href=record.thumbnail_href,
         assets=record.assets,
     )
@@ -695,6 +718,8 @@ def _intersects(
     left: tuple[float, float, float, float],
     right: tuple[float, float, float, float],
 ) -> bool:
+    if not _ordered_bbox(*left) or not _ordered_bbox(*right):
+        return False
     west, south, east, north = left
     other_west, other_south, other_east, other_north = right
     separated = (
@@ -712,9 +737,21 @@ def _bbox(raw: object) -> tuple[float, float, float, float] | None:
     if any(_not_number(value) for value in raw):
         return None
     west, south, east, north = (float(value) for value in raw)
-    if west >= east or south >= north:
+    if not _ordered_bbox(west, south, east, north):
         return None
     return west, south, east, north
+
+
+def _ordered_bbox(west: float, south: float, east: float, north: float) -> bool:
+    """A footprint matches a search only when it is a finite, non-empty box.
+
+    NaN comparisons are never true, so a non-finite box would otherwise
+    intersect every query.
+    """
+
+    if not all(math.isfinite(value) for value in (west, south, east, north)):
+        return False
+    return west < east and south < north
 
 
 def _not_number(value: object) -> bool:
@@ -816,6 +853,9 @@ def _record_from_json(raw: object) -> CatalogRecord | None:
             else None
         ),
         bbox=bbox,
+        orbit=_optional_str(raw.get("orbit")),
+        look=_optional_str(raw.get("look")),
+        place=_optional_str(raw.get("place")) or _place_for_bbox(bbox),
         thumbnail_href=_optional_str(raw.get("thumbnail_href")),
         assets=tuple(assets),
     )
@@ -854,6 +894,9 @@ def _record_to_json(record: CatalogRecord) -> dict[str, object]:
         "mode": record.mode,
         "incidence_angle": record.incidence_angle,
         "bbox": list(record.bbox) if record.bbox is not None else None,
+        "orbit": record.orbit,
+        "look": record.look,
+        "place": record.place,
         "thumbnail_href": record.thumbnail_href,
         "assets": [
             {
@@ -880,6 +923,19 @@ def _optional_str(value: object) -> str | None:
     return None
 
 
+def _place_for_bbox(
+    bbox: tuple[float, float, float, float] | None,
+) -> str | None:
+    if bbox is None:
+        return None
+    west, south, east, north = bbox
+    return place_name((south + north) / 2, (west + east) / 2)
+
+
+def _has_asset(record: CatalogRecord, key: str) -> bool:
+    return any(asset.key == key for asset in record.assets)
+
+
 def _parse_time(value: object) -> datetime | None:
     if not isinstance(value, str) or not value:
         return None
@@ -890,4 +946,3 @@ def _parse_time(value: object) -> datetime | None:
     if parsed.tzinfo is None:
         return parsed.replace(tzinfo=UTC)
     return parsed
-

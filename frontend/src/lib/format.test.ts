@@ -3,6 +3,7 @@ import type { SceneResponse } from "@/types"
 import {
   collectFacts,
   formatBbox,
+  formatFootprintSize,
   formatMeasure,
   formatPercent,
   formatUtc,
@@ -39,6 +40,12 @@ describe("formatters", () => {
   it("prints the bounding box to three decimals", () => {
     expect(formatBbox([-9.21412, 38.66, -9.14, 38.7184])).toBe(
       "-9.214, 38.660, -9.140, 38.718"
+    )
+  })
+
+  it("prints a footprint size in kilometres", () => {
+    expect(formatFootprintSize([-16.95, 28.0, -16.45, 28.5])).toBe(
+      "49 × 56 km"
     )
   })
 

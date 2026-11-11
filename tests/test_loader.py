@@ -83,6 +83,47 @@ class FixtureSceneTest(unittest.TestCase):
             with self.assertRaises(SceneDataError):
                 load_scene(path)
 
+    def test_inverted_or_non_finite_bbox_is_not_a_scene(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            path = Path(raw) / "stac.json"
+            inverted = _item()
+            inverted["bbox"] = [-9.0, 38.7, -9.2, 38.6]
+            path.write_text(json.dumps(inverted), encoding="utf-8")
+            with self.assertRaises(SceneDataError) as caught:
+                load_scene(path)
+            self.assertIn("inverted", str(caught.exception))
+
+            infinite = _item()
+            infinite["bbox"] = [float("-inf"), 0, 1, 1]
+            path.write_text(json.dumps(infinite), encoding="utf-8")
+            with self.assertRaises(SceneDataError) as caught:
+                load_scene(path)
+            self.assertIn("finite", str(caught.exception))
+
+    def test_asset_key_cannot_claim_a_file_outside_the_folder(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            root = Path(raw)
+            outside = root.parent / "outside-secret.json"
+            outside.write_text("secret", encoding="utf-8")
+            try:
+                item = _item()
+                assets = item["assets"]
+                assert isinstance(assets, dict)
+                assets["../outside-secret"] = {
+                    "href": "https://example.test/outside-secret.json",
+                    "type": "application/json",
+                }
+                path = root / "stac.json"
+                path.write_text(json.dumps(item), encoding="utf-8")
+                scene = load_scene(path)
+                stolen = scene.asset("../outside-secret")
+                self.assertIsNotNone(stolen)
+                assert stolen is not None
+                self.assertIsNone(stolen.local_path)
+                self.assertFalse(stolen.on_disk)
+            finally:
+                outside.unlink(missing_ok=True)
+
 
 def _item() -> dict[str, object]:
     return {

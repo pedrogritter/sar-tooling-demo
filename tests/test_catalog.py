@@ -8,10 +8,16 @@ from pathlib import Path
 
 from scene.catalog import (
     COLLECTION_URL,
+    LARGE_KEYS,
+    PREVIEW_KEYS,
+    CatalogAsset,
     CatalogError,
     CatalogService,
     SearchQuery,
+    default_asset_keys,
+    is_large_asset,
     parse_scene_id,
+    record_public,
 )
 
 LISBON = "ICEYE_EYCKP5_20251024T135309Z_6724574_X52_SLF"
@@ -49,10 +55,14 @@ class SearchTest(unittest.TestCase):
             satellite = service.search(SearchQuery(satellite="x52"))
             self.assertEqual([item.scene_id for item in satellite.items], [LISBON])
 
-            footprint = service.search(
-                SearchQuery(bbox=(-10.0, 38.0, -9.0, 39.0))
-            )
+            footprint = service.search(SearchQuery(bbox=(-10.0, 38.0, -9.0, 39.0)))
             self.assertEqual([item.scene_id for item in footprint.items], [LISBON])
+            self.assertEqual(footprint.items[0].place, "Lisbon")
+            public = record_public(footprint.items[0], False)
+            self.assertEqual(public["place"], "Lisbon")
+            self.assertTrue(public["has_slc"])
+            self.assertFalse(public["has_grd"])
+            self.assertFalse(public["has_video"])
             self.assertEqual(footprint.unread_for_bbox, 2)
             self.assertEqual(footprint.indexed, 1)
 
@@ -79,8 +89,57 @@ class SearchTest(unittest.TestCase):
             self.assertEqual(again.indexed, 0)
             self.assertFalse(again.items[0].cached)
 
+    def test_non_finite_footprint_does_not_match_a_search(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
 
-def _service(root: Path, graphic_href: str | None = None) -> CatalogService:
+            def fetch_json(url: str) -> object:
+                if url == COLLECTION_URL:
+                    return {"links": [_link(LISBON)]}
+                return {
+                    "id": LISBON,
+                    "bbox": [float("nan"), 0, 1, 1],
+                    "properties": {"sar:instrument_mode": "spotlight"},
+                    "assets": {
+                        "graphic": {
+                            "href": f"{HOST}/data/x/THM.png",
+                            "title": "Thumbnail",
+                            "type": "image/png",
+                        }
+                    },
+                }
+
+            service = CatalogService(
+                index_path=Path(raw) / "index.json",
+                fetch_json=fetch_json,
+                auto_enrich=False,
+            )
+            service.ensure_ready()
+            service.enrich_item(LISBON)
+            found = service.search(SearchQuery(bbox=(10.0, 10.0, 11.0, 12.0)))
+            self.assertEqual(found.items, ())
+            self.assertEqual(found.unread_for_bbox, 1)
+
+
+class PreviewPackTest(unittest.TestCase):
+    def test_large_rasters_stay_out_of_the_default_download(self) -> None:
+        self.assertTrue(LARGE_KEYS.isdisjoint(PREVIEW_KEYS))
+        self.assertFalse(is_large_asset("graphic", ()))
+        self.assertFalse(is_large_asset("qlk-cog", ("data",)))
+        self.assertTrue(is_large_asset("slc-cog", ()))
+        self.assertTrue(is_large_asset("custom-product", ("data",)))
+        assets = (
+            CatalogAsset("graphic", f"{HOST}/a.png", "Thumbnail", "image/png", ()),
+            CatalogAsset("slc-cog", f"{HOST}/a.tif", "SLC", "image/tiff", ("data",)),
+            CatalogAsset("qlk-cog", f"{HOST}/b.tif", "Quicklook", "image/tiff", ()),
+        )
+        self.assertEqual(default_asset_keys(assets), ["graphic", "qlk-cog"])
+
+
+def _service(
+    root: Path,
+    graphic_href: str | None = None,
+    extra_assets: dict[str, object] | None = None,
+) -> CatalogService:
     href = graphic_href or f"{HOST}/data/x/THM.png"
 
     def fetch_json(url: str) -> object:
@@ -117,6 +176,7 @@ def _service(root: Path, graphic_href: str | None = None) -> CatalogService:
                     "type": "image/tiff",
                     "roles": ["data"],
                 },
+                **(extra_assets or {}),
             },
         }
 

@@ -35,6 +35,17 @@ class MigrateFlatSceneTest(unittest.TestCase):
             )
             self.assertIsNone(migrate_flat_scene(root))
 
+    def test_listed_asset_that_is_missing_is_not_created(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            root = Path(raw)
+            (root / "stac.json").write_text(json.dumps(_item()), encoding="utf-8")
+            destination = migrate_flat_scene(root)
+            self.assertIsNotNone(destination)
+            assert destination is not None
+            self.assertFalse((destination / "graphic.png").exists())
+            self.assertFalse((destination / "slc-cog.tif").exists())
+            self.assertTrue((destination / "stac.json").is_file())
+
     def test_unsafe_id_is_refused(self) -> None:
         with tempfile.TemporaryDirectory() as raw:
             root = Path(raw)

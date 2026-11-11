@@ -9,6 +9,7 @@ command saved. The default path is the Lisbon test scene. A flat
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TypeGuard
@@ -171,7 +172,7 @@ def _load_asset(key: str, raw: object, data_dir: Path) -> Asset:
         title=title if isinstance(title, str) and title else key,
         media_type=media_type if isinstance(media_type, str) else "",
         href=href,
-        local_path=local_path if local_path.is_file() else None,
+        local_path=local_path if _file_inside(data_dir, local_path) else None,
     )
 
 
@@ -191,9 +192,27 @@ def _require_bbox(raw: object, path: Path) -> BoundingBox:
             f"{path} bbox must be four numbers: west, south, east, north"
         )
     west, south, east, north = (float(value) for value in raw)
+    if not all(math.isfinite(value) for value in (west, south, east, north)):
+        raise SceneDataError(f"{path} bbox must be finite degrees")
     if west >= east or south >= north:
         raise SceneDataError(f"{path} bbox is empty or inverted")
     return BoundingBox(west=west, south=south, east=east, north=north)
+
+
+def _file_inside(directory: Path, candidate: Path) -> bool:
+    """True when ``candidate`` is a file and stays inside ``directory``.
+
+    An asset key such as ``../secret`` must not count a file outside the
+    scene folder as a product of this collect.
+    """
+
+    if not candidate.is_file():
+        return False
+    try:
+        candidate.resolve().relative_to(directory.resolve())
+    except (OSError, ValueError):
+        return False
+    return True
 
 
 def _require_polarizations(raw: object, path: Path) -> tuple[str, ...]:

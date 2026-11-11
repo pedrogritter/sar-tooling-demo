@@ -28,6 +28,22 @@ describe("catalog search path", () => {
     expect(params.get("limit")).toBe("24")
   })
 
+  it("omits a whitespace query and a non-finite footprint", () => {
+    const path = catalogSearchPath({
+      ...filters,
+      q: "   ",
+      west: "NaN",
+      south: "0",
+      east: "1",
+      north: "1",
+    })
+    const params = new URLSearchParams(path.split("?")[1])
+    expect(params.get("q")).toBeNull()
+    expect(params.get("bbox")).toBeNull()
+    expect(params.has("end")).toBe(false)
+    expect(params.has("product")).toBe(false)
+  })
+
   it("sends a footprint only when all four edges are numbers", () => {
     const path = catalogSearchPath({
       ...filters,
