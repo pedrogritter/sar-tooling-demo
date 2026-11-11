@@ -11,7 +11,13 @@ from scene.jobs import read_job_result
 from scene.loader import SceneDataError, load_scene
 from scene.paths import scene_dir, valid_scene_id
 
-from .geometry import INCIDENCE_TOLERANCE, Collect, can_pair, is_calibrated_mode
+from .geometry import (
+    INCIDENCE_TOLERANCE,
+    MIN_OVERLAP,
+    Collect,
+    can_pair,
+    is_calibrated_mode,
+)
 from .raster import calibration_factor, read_json
 
 STACK_MIN = 2
@@ -110,7 +116,8 @@ TOOLS: tuple[ToolSpec, ...] = (
         "date-of-change",
         "Date of change",
         "Stack",
-        "The date a pixel left the stack median, when the departure exceeds 1.5 dB.",
+        "The date a pixel left the stack median, when the departure "
+        "is at least 3 dB and the patch is at least 8 pixels.",
         "stack",
     ),
     ToolSpec(
@@ -263,13 +270,15 @@ def _lock(
 
 
 def _same_look() -> str:
-    """The pairing clause. The number is the tolerance ``can_pair`` enforces."""
+    """The pairing clause. The numbers are what ``can_pair`` enforces."""
 
     span = f"{INCIDENCE_TOLERANCE:g}"
     unit = "degree" if INCIDENCE_TOLERANCE == 1 else "degrees"
+    overlap = f"{MIN_OVERLAP * 100:g}"
     return (
-        "the same orbit direction, the same look side, and an incidence "
-        f"angle within {span} {unit}"
+        "the same orbit direction, the same look side, an incidence "
+        f"angle within {span} {unit}, and footprints that overlap by at least "
+        f"{overlap} percent of the smaller one"
     )
 
 

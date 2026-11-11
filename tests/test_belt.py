@@ -47,7 +47,7 @@ class WaterAndChangeTest(unittest.TestCase):
         self.assertFalse(rough.any())
         self.assertIn("one class", note)
 
-    def test_change_under_one_and_a_half_db_stays_gray(self) -> None:
+    def test_change_under_three_db_or_a_small_patch_is_excluded(self) -> None:
         earlier = np.zeros((8, 8), dtype=np.float32)
         later = earlier.copy()
         later[:, 4:] = 3.0
@@ -267,7 +267,7 @@ class StackToolTest(unittest.TestCase):
         self.assertEqual(levels[0], -15.0)
         self.assertIsNone(levels[1])
 
-    def test_date_of_change_ignores_a_speck_and_a_two_db_shift(self) -> None:
+    def test_date_of_change_ignores_a_speck_and_keeps_a_four_db_patch(self) -> None:
         frames = [np.zeros((12, 12), dtype=np.float32) for _ in range(3)]
         frames[1] = frames[1].copy()
         frames[1][0, 0] = 10.0
@@ -434,7 +434,9 @@ class EligibilityTest(unittest.TestCase):
             )
             views = self._views(root, first)
             self.assertNotIn(second, views["amplitude-change"].partners)
-            self.assertIn("within 1 degree", views["amplitude-change"].reason)
+            reason = views["amplitude-change"].reason
+            self.assertIn("within 1 degree", reason)
+            self.assertIn("30 percent", reason)
 
             self._patch_stac(
                 root,

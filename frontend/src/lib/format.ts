@@ -162,7 +162,7 @@ export function collectFacts(scene: SceneResponse): Fact[] {
     { label: "Orbit", value: scene.orbit_state },
     {
       label: "Incidence",
-      value: `${scene.incidence_angle.toFixed(1)} deg`,
+      value: `${scene.incidence_angle.toFixed(1)}°`,
     },
     { label: "Bounding box", value: formatBbox(scene.bbox) },
   ]

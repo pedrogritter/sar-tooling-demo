@@ -96,10 +96,12 @@ LIMITS = {
         "not a route."
     ),
     "amplitude-change": (
-        "Red is the earlier date and has fled. Cyan is the later date and is new. "
-        "Gray held its brightness, or the difference is under 3 dB, or the patch "
-        "is smaller than 8 pixels. Speckle and a residual shift can still colour "
-        "a larger patch. The areas are the measurement."
+        "The picture is a shared stretch. Red is the earlier date and cyan "
+        "is the later date. Gray is where those two dates match. A difference "
+        "under 3 dB, and a patch under 8 pixels, still take colour. "
+        "The darker, brighter, and unchanged areas keep only a difference "
+        "of at least 3 dB in a patch of at least 8 pixels. Speckle and a "
+        "residual shift can still fall in those areas."
     ),
     "water-persistence": (
         "Light blue is rare water. Solid blue is water on every date. "

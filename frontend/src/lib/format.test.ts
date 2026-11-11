@@ -77,7 +77,7 @@ describe("formatters", () => {
       "VV"
     )
     expect(facts.find((fact) => fact.label === "Incidence")?.value).toBe(
-      "31.2 deg"
+      "31.2°"
     )
     expect(facts.find((fact) => fact.label === "Bounding box")?.value).toBe(
       "-9.214, 38.660, -9.140, 38.718"

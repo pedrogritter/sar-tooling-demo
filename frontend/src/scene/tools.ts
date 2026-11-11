@@ -32,38 +32,38 @@ export const ANALYSIS_TOOLS = [
   },
   {
     id: "built-up",
-    label: "Built-up",
+    label: "Built-up return",
     category: "Surface",
     description: "Bright clusters on land. Fraction of land and a cluster count.",
   },
   {
     id: "returns-on-water",
-    label: "Returns",
+    label: "Returns on water",
     category: "Objects",
     description:
       "Compact bright returns that touch the water. The label stays bright return.",
   },
   {
     id: "long-structure",
-    label: "Structure",
+    label: "Long structure",
     category: "Objects",
     description: "A long bright return along the waterline.",
   },
   {
     id: "dwell-motion",
-    label: "Motion",
+    label: "Dwell motion",
     category: "Motion",
     description: "Tracks of bright returns during the dwell.",
   },
   {
     id: "amplitude-change",
-    label: "Change",
+    label: "Amplitude change",
     category: "Change",
     description: "Earlier date in red, later date in cyan. Needs the same look.",
   },
   {
     id: "water-persistence",
-    label: "Persistence",
+    label: "Water persistence",
     category: "Stack",
     description: "How many dates each pixel is water.",
   },
@@ -75,7 +75,7 @@ export const ANALYSIS_TOOLS = [
   },
   {
     id: "dark-sea-anomaly",
-    label: "Sea anomaly",
+    label: "Dark sea anomaly",
     category: "Stack",
     description:
       "A patch darker than the stack median of the sea. Extent only, not a spill.",
@@ -90,7 +90,8 @@ export const ANALYSIS_TOOLS = [
     id: "date-of-change",
     label: "Date of change",
     category: "Stack",
-    description: "The date a pixel left the stack median.",
+    description:
+      "The date a pixel left the stack median, when the departure is at least 3 dB and the patch is at least 8 pixels.",
   },
   {
     id: "repeat-returns",

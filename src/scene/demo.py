@@ -34,7 +34,7 @@ _TOOLS: tuple[tuple[str, str, tuple[tuple[str, str], ...]], ...] = (
         "Open water",
         (
             ("Water area", "0 km² placeholder"),
-            ("Scene fraction", "0 placeholder"),
+            ("Water fraction", "0 placeholder"),
             ("Median sigma-nought", "0 dB placeholder"),
         ),
     ),
@@ -42,17 +42,18 @@ _TOOLS: tuple[tuple[str, str, tuple[tuple[str, str], ...]], ...] = (
         "sea-roughness",
         "Sea roughness",
         (
-            ("Calm water", "0 km² placeholder"),
-            ("Rough water", "0 km² placeholder"),
-            ("Spread", "0 dB placeholder"),
+            ("Calm area", "0 km² placeholder"),
+            ("Rough area", "0 km² placeholder"),
+            ("Calm median", "0 dB placeholder"),
+            ("Rough median", "0 dB placeholder"),
         ),
     ),
     (
         "built-up",
         "Built-up return",
         (
-            ("Land fraction", "0 placeholder"),
-            ("Bright clusters", "0 placeholder"),
+            ("Built-up fraction of land", "0 placeholder"),
+            ("Clusters", "0 placeholder"),
         ),
     ),
     (
@@ -60,15 +61,15 @@ _TOOLS: tuple[tuple[str, str, tuple[tuple[str, str], ...]], ...] = (
         "Returns on water",
         (
             ("Bright returns", "0 placeholder"),
-            ("Largest return", "0 m² placeholder"),
         ),
     ),
     (
         "long-structure",
         "Long structure",
         (
-            ("Structures", "0 placeholder"),
-            ("Longest return", "0 m placeholder"),
+            ("Length", "0 m placeholder"),
+            ("Width", "0 m placeholder"),
+            ("Peak sigma-nought", "0 dB placeholder"),
         ),
     ),
 )

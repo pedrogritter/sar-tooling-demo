@@ -215,7 +215,8 @@ def change_masks(
 ) -> tuple[np.ndarray, np.ndarray]:
     """Later-darker and later-brighter masks.
 
-    A difference under 3 dB stays gray, and so does a patch under 8 pixels.
+    A difference under 3 dB is excluded from both masks, and so is a patch
+    under 8 pixels. The picture is a separate ungated composite.
     """
 
     delta = later - earlier

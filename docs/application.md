@@ -192,7 +192,7 @@ STAC fields float on the picture and can be hidden. The compact set is collected
 
 ### Analysis belt
 
-The tool column groups the measurements as Surface, Objects, Motion, Change, and Stack. `GET /api/scenes/<id>/tools` decides which ones can run. A tool the scene cannot support stays in the list and names the missing file or the missing second look. The page labels are shorter than the belt names. The table below uses the page labels.
+The tool column groups the measurements as Surface, Objects, Motion, Change, and Stack. `GET /api/scenes/<id>/tools` decides which ones can run. A tool the scene cannot support stays in the list and names the missing file or the missing second look. The page uses the belt names.
 
 Running a tool draws a decibel picture with the legend in the PNG, then writes `measurements.json` and `briefing.md`. The pane shows the step sentence, then the summary rows and the briefing HTML from that job. Selecting a tool that already has those files puts the picture, the summary, and the briefing back without another run. A finished job in this session replaces that saved view until another tool is selected.
 
@@ -204,14 +204,14 @@ Change and stack tools compare scenes that share a look: same orbit direction, s
 | --- | --- |
 | Open water | Dark smooth water, from the darkest histogram mode. Area, fraction of the scene, and median sigma-nought. Shadow, tarmac, and sand are dark for the same reason. Flooded vegetation and flooded streets get brighter, so this mask marks them dry. |
 | Sea roughness | Calm water against wind-roughened water, inside the water mask. A sea that spans less than 1.5 dB stays one class. This is roughness, not a wave period, a wave height, or a current. |
-| Built-up | Bright clusters on land. Fraction of land and a cluster count. Brightness is a double-bounce return, not a building height and not a land-use class. |
-| Returns | Compact bright returns that touch the water. The label stays bright return. A hull, a pier, and a platform all qualify. |
-| Structure | A long bright return along the waterline. Length includes layover. An empty class is a valid result. |
-| Motion | Tracks of bright returns during this collect. Cyan held still. Red moved. Displacement and speed over those seconds, not a route. |
-| Change | Earlier date in red, later date in cyan. A difference under 3 dB, or a patch under 8 pixels, stays gray. The areas are the measurement. It does not name a flood or a vessel. |
-| Persistence | How many dates each pixel is water. Two dates are a pair, not a seasonal record. |
+| Built-up return | Bright clusters on land. Fraction of land and a cluster count. Brightness is a double-bounce return, not a building height and not a land-use class. |
+| Returns on water | Compact bright returns that touch the water. The label stays bright return. A hull, a pier, and a platform all qualify. |
+| Long structure | A long bright return along the waterline. Length includes layover. An empty class is a valid result. |
+| Dwell motion | Tracks of bright returns during this collect. Cyan held still. Red moved. Displacement and speed over those seconds, not a route. |
+| Amplitude change | Earlier date in red, later date in cyan. The picture is that shared stretch, so a difference under 3 dB, or a patch under 8 pixels, still takes colour. Gray is where the two dates match. The darker, brighter, and unchanged areas count a difference of at least 3 dB in a patch of at least 8 pixels. It does not name a flood or a vessel. |
+| Water persistence | How many dates each pixel is water. Two dates are a pair, not a seasonal record. |
 | Sea state | Median sigma-nought of the water on each date. A lower bar is a darker sea, not a Beaufort number. |
-| Sea anomaly | Water at least 2 dB darker than the stack median, in a patch of at least 8 pixels, whose surrounding ring is at least 1 dB brighter. Extent only. The title stays dark sea anomaly. |
+| Dark sea anomaly | Water at least 2 dB darker than the stack median, in a patch of at least 8 pixels, whose surrounding ring is at least 1 dB brighter. Extent only. The title stays dark sea anomaly. |
 | Shoreline | The waterline once per date. A shift is a waterline, not a tide height. |
 | Date of change | The date a pixel left the stack median, when the departure is at least 3 dB and the patch is at least 8 pixels. |
 | Repeat returns | A bright return seen on many dates against one seen once. Many dates can be a rock, a pier, or a moored hull. |
@@ -301,8 +301,8 @@ A model in any of the items below may phrase measurements, STAC fields, the scen
 ### Queued
 
 - [ ] Decide the Lisbon measurement. `POST /api/jobs/measure` and `scene.analyze` still run, and `ResultsSection`, `use-measure-job`, and `fetchScene` are unused by `ScenePage`. Either mount that result on the test scene or retire the unused UI.
-- [ ] Make the date-of-change sentence match the measurement. `scene.belt.catalog` says a departure of 1.5 dB. `scene.belt.stack` and the briefing label a departure of 3 dB in a patch of at least 8 pixels.
-- [ ] Align the short tool labels in `frontend/src/scene/tools.ts` with the belt names in `scene.belt.catalog`: Built-up / Built-up return, Returns / Returns on water, Structure / Long structure, Motion / Dwell motion, Change / Amplitude change, Persistence / Water persistence, Sea anomaly / Dark sea anomaly.
+- [x] Date of change states a departure of at least 3 dB in a patch of at least 8 pixels, matching the measurement.
+- [x] The pane uses the belt names: Built-up return, Returns on water, Long structure, Dwell motion, Amplitude change, Water persistence, and Dark sea anomaly.
 
 ### Analyst-facing tools
 
