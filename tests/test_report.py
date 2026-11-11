@@ -2,15 +2,26 @@
 
 from __future__ import annotations
 
+import dataclasses
 import json
+import os
 import tempfile
 import unittest
 from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
+from typing import Any
 from unittest.mock import patch
 
+from langchain_core.language_models.chat_models import BaseChatModel
+from langchain_core.messages import AIMessage, BaseMessage
+from langchain_core.outputs import ChatGeneration, ChatResult
+from langchain_core.runnables import Runnable, RunnableLambda
+from pydantic import Field
+
 from scene.catalog import CatalogRecord
+from scene.paths import LISBON_SCENE_ID
+from scene.report.chains import PlanChoice, ReportChains, chains_or_none
 from scene.report.facts import ReportFacts, report_facts
 from scene.report.schema import ReportPlan
 from scene.report.validate import validate_plan
@@ -330,6 +341,232 @@ class ValidatePlanTests(unittest.TestCase):
     def test_repeated_ids_are_kept_once(self) -> None:
         plan = validate_plan(self.facts, {"tools": ["open-water", "open-water"]})
         self.assertEqual(plan.selected, ["open-water"])
+
+
+class FakeChatModel(BaseChatModel):
+    """A chat model that answers from memory and records every prompt it is given."""
+
+    plan: object = Field(default_factory=dict)
+    text: str = "phrased"
+    seen: list[list[BaseMessage]] = Field(default_factory=list)
+
+    @property
+    def _llm_type(self) -> str:
+        return "fake"
+
+    def _generate(
+        self, messages: list[BaseMessage], *args: Any, **kwargs: Any
+    ) -> ChatResult:
+        self.seen.append(messages)
+        return ChatResult(generations=[ChatGeneration(message=AIMessage(self.text))])
+
+    def with_structured_output(self, schema: Any, **kwargs: Any) -> Runnable[Any, Any]:
+        """Answer the plan call with ``plan`` and keep the prompt it was given."""
+
+        def reply(value: Any) -> object:
+            self.seen.append(value.to_messages())
+            return self.plan
+
+        return RunnableLambda(reply)
+
+    def prompt_text(self) -> str:
+        """Every message of the last prompt, joined."""
+
+        return "\n".join(str(message.content) for message in self.seen[-1])
+
+
+class ChainsOrNoneTests(unittest.TestCase):
+    """The key gate. No test here invokes a model or opens a socket."""
+
+    @contextmanager
+    def _environment(self, env_text: str | None, **environ: str) -> Iterator[None]:
+        """A project root holding ``env_text`` as .env, and exactly ``environ``."""
+
+        with tempfile.TemporaryDirectory() as raw:
+            root = Path(raw)
+            if env_text is not None:
+                (root / ".env").write_text(env_text, encoding="utf-8")
+            with (
+                patch("scene.analyze.project_root", return_value=root),
+                patch.dict(os.environ, environ, clear=True),
+            ):
+                yield
+
+    def test_is_none_when_the_key_is_absent(self) -> None:
+        with self._environment(None), patch("scene.report.chains.ChatOpenAI") as chat:
+            self.assertIsNone(chains_or_none())
+        chat.assert_not_called()
+
+    def test_is_none_when_dotenv_has_no_key(self) -> None:
+        with (
+            self._environment("OTHER=1\n# OPENAI_API_KEY=commented\n"),
+            patch("scene.report.chains.ChatOpenAI") as chat,
+        ):
+            self.assertIsNone(chains_or_none())
+        chat.assert_not_called()
+
+    def test_is_none_when_the_key_is_blank(self) -> None:
+        for env_text, environ in (
+            ("OPENAI_API_KEY=\n", {}),
+            (None, {"OPENAI_API_KEY": "   "}),
+        ):
+            with self.subTest(env_text=env_text, environ=environ):
+                with (
+                    self._environment(env_text, **environ),
+                    patch("scene.report.chains.ChatOpenAI") as chat,
+                ):
+                    self.assertIsNone(chains_or_none())
+                chat.assert_not_called()
+
+    def test_builds_the_model_from_dotenv_with_the_pinned_settings(self) -> None:
+        with (
+            self._environment("OPENAI_API_KEY=from-dotenv\n"),
+            patch(
+                "scene.report.chains.ChatOpenAI", return_value=FakeChatModel()
+            ) as chat,
+        ):
+            chains = chains_or_none()
+        self.assertIsInstance(chains, ReportChains)
+        chat.assert_called_once_with(model="gpt-4o-mini", temperature=0)
+
+    def test_an_existing_environment_value_wins_over_dotenv(self) -> None:
+        with (
+            self._environment("OPENAI_API_KEY=\n", OPENAI_API_KEY="from-environment"),
+            patch(
+                "scene.report.chains.ChatOpenAI", return_value=FakeChatModel()
+            ) as chat,
+        ):
+            self.assertIsInstance(chains_or_none(), ReportChains)
+        chat.assert_called_once()
+
+
+class ReportChainsTests(unittest.TestCase):
+    """Prompts and result shapes, with a fake chat model. Nothing is sent anywhere."""
+
+    def setUp(self) -> None:
+        self.facts = _facts(
+            [
+                {
+                    **_tool("open-water"),
+                    "label": "Open water",
+                    "description": "Dark water as a share of the frame.",
+                    "overview_url": "/overview-url-leak.png",
+                    "measurement": "measurement-leak",
+                    "briefing_html": "<p>briefing-leak</p>",
+                },
+                _tool("amplitude-change", partners=[NEIGHBOUR_ID]),
+            ],
+            [CATALOGUE_ROW],
+        )
+
+    def test_plan_returns_exactly_the_keys_the_validator_reads(self) -> None:
+        model = FakeChatModel(
+            plan=PlanChoice(
+                tools=["open-water"], catalogue_only=[CACHED_ID], partner_id=None
+            )
+        )
+        plan = ReportChains(model).plan("How dark is the water?", self.facts)
+        self.assertEqual(
+            plan,
+            {
+                "tools": ["open-water"],
+                "catalogue_only": [CACHED_ID],
+                "partner_id": None,
+            },
+        )
+
+    def test_plan_does_not_drop_ids_and_validate_plan_does(self) -> None:
+        raw: dict[str, Any] = {
+            "tools": ["open-water", "invented"],
+            "catalogue_only": ["ICEYE_Z_20260301T000000Z_1_X1_SM"],
+            "partner_id": "nobody",
+        }
+        for model_output in (raw, PlanChoice(**raw)):
+            with self.subTest(kind=type(model_output).__name__):
+                chains = ReportChains(FakeChatModel(plan=model_output))
+                plan = chains.plan("Anything?", self.facts)
+                self.assertEqual(plan, raw)
+                self.assertEqual(
+                    validate_plan(self.facts, plan).selected, ["open-water"]
+                )
+
+    def test_plan_prompt_names_the_question_the_tools_and_the_catalogue(self) -> None:
+        model = FakeChatModel(
+            plan={"tools": [], "catalogue_only": [], "partner_id": None}
+        )
+        ReportChains(model).plan("How dark is the water?", self.facts)
+        prompt = model.prompt_text()
+        for expected in (
+            "How dark is the water?",
+            "open-water",
+            "Dark water as a share of the frame.",
+            "amplitude-change",
+            NEIGHBOUR_ID,
+            CACHED_ID,
+            "only the tools that answer the question",
+        ):
+            self.assertIn(expected, prompt)
+        for leak in ("overview-url-leak", "measurement-leak", "briefing-leak"):
+            self.assertNotIn(leak, prompt)
+
+    def test_scene_note_is_in_the_plan_prompt_only_for_the_lisbon_scene(self) -> None:
+        note = "No detector labelled this frame."
+        for scene_id, present in ((LISBON_SCENE_ID, True), (OPEN_ID, False)):
+            with self.subTest(scene_id=scene_id):
+                model = FakeChatModel(plan={})
+                facts = dataclasses.replace(self.facts, scene_id=scene_id)
+                ReportChains(model).plan("What is here?", facts)
+                self.assertEqual(note in model.prompt_text(), present)
+
+    def test_phrase_prompt_carries_the_measurement_limit_and_scene_fields(self) -> None:
+        model = FakeChatModel(text="The water covers 12.5 % of the frame.")
+        measurement = {
+            "tool_id": "open-water",
+            "summary": [{"label": "Water area", "value": "12.5 %"}],
+            "limit": "Dark pixels are not proof of water.",
+            "overview_path": "/data/overview-path-leak.png",
+        }
+        facts = dataclasses.replace(self.facts, overview_metres=(1.25, 2.5))
+        text = ReportChains(model).phrase("How dark?", facts, measurement)
+        self.assertEqual(text, "The water covers 12.5 % of the frame.")
+        prompt = model.prompt_text()
+        for expected in (
+            "How dark?",
+            "Water area",
+            "12.5 %",
+            "Dark pixels are not proof of water.",
+            "stripmap",
+            "26.0",
+            "ascending",
+            "right",
+            "1.25",
+            "2.5",
+            "limit sentence unchanged",
+            "ship",
+            "spill",
+            "tide height",
+            "cause",
+        ):
+            self.assertIn(expected, prompt)
+        self.assertNotIn("overview-path-leak", prompt)
+
+    def test_phrase_prompt_is_not_given_other_tools_or_raster_data(self) -> None:
+        model = FakeChatModel()
+        ReportChains(model).phrase(
+            "How dark?",
+            self.facts,
+            {"summary": [], "limit": "A limit."},
+        )
+        prompt = model.prompt_text()
+        for leak in ("amplitude-change", "measurement-leak", CACHED_ID, ".tif", ".png"):
+            self.assertNotIn(leak, prompt)
+
+    def test_phrase_says_the_scale_is_unavailable_when_there_is_none(self) -> None:
+        model = FakeChatModel()
+        ReportChains(model).phrase(
+            "How dark?", self.facts, {"summary": [], "limit": "A limit."}
+        )
+        self.assertIn("null", model.prompt_text())
 
 
 if __name__ == "__main__":

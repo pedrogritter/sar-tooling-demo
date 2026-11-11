@@ -3,3 +3,5 @@ pillow>=10.2,<11
 scipy>=1.14,<2
 tifffile>=2024.9,<2026
 imagecodecs>=2024.9,<2027
+langchain-core>=1.8,<2
+langchain-openai>=1.7,<2
