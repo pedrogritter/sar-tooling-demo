@@ -35,12 +35,18 @@ def load_amplitude(path: Path, side: int = OVERVIEW_SIDE) -> tuple[np.ndarray, f
     with tifffile.TiffFile(path) as tiff:
         series = tiff.series[0]
         full = series.levels[0]
-        chosen = full
+        # The finest overview that still fits the budget. A pyramid whose
+        # coarsest level is only slightly over the budget must not fall
+        # back to the full raster: Tenerife's overview is 1677 px and the
+        # full grid is 26820.
+        chosen = None
         for level in series.levels:
             longest = max(int(level.shape[0]), int(level.shape[1]))
             if longest <= side:
                 chosen = level
                 break
+        if chosen is None:
+            chosen = series.levels[-1]
         array = np.asarray(chosen.asarray())
         full_shape = (int(full.shape[0]), int(full.shape[1]))
     if array.ndim == 3 and array.shape[-1] in {3, 4}:

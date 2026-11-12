@@ -320,17 +320,10 @@ def _single_layers(
                 {"label": "Width", "value": f"{structure.width_m:.0f} m"},
                 {"label": "Peak sigma-nought", "value": f"{structure.peak_db:.1f} dB"},
             ]
-            rows, cols = np.nonzero(structure.mask)
-            strokes = [
-                Stroke(
-                    (
-                        (float(cols.min()), float(rows.mean())),
-                        (float(cols.max()), float(rows.mean())),
-                    ),
-                    STRUCTURE,
-                    3,
-                )
-            ]
+            ends = structure.ends
+            if ends is None:
+                raise RuntimeError("Long structure has no end-to-end axis.")
+            strokes = [Stroke(ends, STRUCTURE, 3)]
             legend = ["Amber line: long bright structure."]
         return summary, [], strokes, legend
     returns = waterline_returns(

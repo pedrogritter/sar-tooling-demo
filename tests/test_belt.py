@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import math
 import tempfile
 import unittest
 from collections.abc import Callable
@@ -15,6 +16,7 @@ import tifffile
 from scene.belt.catalog import tools_for_scene
 from scene.belt.geometry import INCIDENCE_TOLERANCE, Grid, warp_affine
 from scene.belt.measure import (
+    _axis_lengths,
     built_up_mask,
     change_masks,
     long_structure,
@@ -23,7 +25,7 @@ from scene.belt.measure import (
     water_mask,
     waterline_returns,
 )
-from scene.belt.run import run_tool
+from scene.belt.run import Frame, _load_frame, _single_layers, run_tool
 from scene.belt.stack import (
     dark_anomaly,
     date_of_change,
@@ -32,6 +34,8 @@ from scene.belt.stack import (
     shoreline,
     site_activity,
 )
+from scene.grid import metres
+from scene.paths import LISBON_SCENE_ID, scene_dir
 
 
 class WaterAndChangeTest(unittest.TestCase):
@@ -46,6 +50,28 @@ class WaterAndChangeTest(unittest.TestCase):
         self.assertTrue(calm.any())
         self.assertFalse(rough.any())
         self.assertIn("one class", note)
+
+    def test_an_enclosed_island_stays_dry(self) -> None:
+        rng = np.random.default_rng(2)
+        db = np.full((100, 100), -16.0, dtype=np.float32)
+        db += rng.normal(0, 0.04, db.shape).astype(np.float32)
+        island = -6.0 + rng.normal(0, 0.04, (40, 40)).astype(np.float32)
+        db[30:70, 30:70] = island
+        water, mode = water_mask(db)
+        self.assertLess(mode, -12.0)
+        self.assertLess(float(water[40:60, 40:60].mean()), 0.1)
+        self.assertGreater(float(water[5:15, 5:15].mean()), 0.8)
+        self.assertLess(float(water.mean()), 0.9)
+
+    def test_low_contrast_textured_land_is_not_the_whole_scene(self) -> None:
+        rng = np.random.default_rng(1)
+        db = np.full((160, 160), 13.0, dtype=np.float32)
+        db += rng.normal(0, 0.015, db.shape).astype(np.float32)
+        db[50:120, 50:120] += rng.normal(0.05, 0.12, (70, 70)).astype(np.float32)
+        water, _mode = water_mask(db)
+        self.assertLess(float(water.mean()), 0.9)
+        self.assertLess(float(water[70:100, 70:100].mean()), 0.35)
+        self.assertGreater(float(water[5:25, 5:25].mean()), 0.7)
 
     def test_change_under_three_db_or_a_small_patch_is_excluded(self) -> None:
         earlier = np.zeros((8, 8), dtype=np.float32)
@@ -322,7 +348,8 @@ class SingleSceneTest(unittest.TestCase):
     def test_a_bright_return_must_touch_the_water_and_a_short_one_is_not_long(
         self,
     ) -> None:
-        db = np.full((40, 80), -16.0, dtype=np.float32)
+        # 48 rows leaves an end-to-end axis over 200 m after closing trims the border.
+        db = np.full((48, 80), -16.0, dtype=np.float32)
         water = np.zeros(db.shape, dtype=bool)
         water[:, :6] = True
         db[water] = -18.0
@@ -503,6 +530,194 @@ class EligibilityTest(unittest.TestCase):
         if bbox is not None:
             payload["bbox"] = bbox
         path.write_text(json.dumps(payload), encoding="utf-8")
+
+
+class LongStructureAxisTest(unittest.TestCase):
+    """End-to-end length, the diagonal stroke, and the corridor past the band."""
+
+    def test_a_straight_bar_reports_its_end_to_end_length(self) -> None:
+        # 61 centres at 10 m span 600 m. Four standard deviations is about 15% high.
+        db = np.full((90, 40), -16.0, dtype=np.float32)
+        water = np.zeros(db.shape, dtype=bool)
+        water[:, :5] = True
+        db[10:71, 8] = -2.0
+        structure = long_structure(db, water, -18.0, 10.0, 10.0)
+        self.assertIsNotNone(structure)
+        assert structure is not None
+        self.assertAlmostEqual(structure.length_m, 600.0, delta=30.0)
+
+    def test_a_diagonal_stroke_follows_the_bar(self) -> None:
+        db, water = _diagonal_bar()
+        frame = Frame(
+            "synthetic",
+            "synthetic",
+            db,
+            Grid(0.0, 0.0, 0.0, 0.0, 0.0, 0.0),
+            1.0,
+            4.0,
+            4.0,
+            -20.0,
+            0.0,
+        )
+        summary, _layers, strokes, _legend = _single_layers(
+            "long-structure", frame, water, -18.0
+        )
+        self.assertEqual(len(strokes), 1)
+        self.assertEqual(len(strokes[0].points), 2)
+        start, end = strokes[0].points
+        self.assertGreater(abs(start[1] - end[1]), 20.0)
+        reported = float(
+            {row["label"]: row["value"] for row in summary}["Length"].split()[0]
+        )
+        ground = float(np.hypot((end[0] - start[0]) * 4.0, (end[1] - start[1]) * 4.0))
+        self.assertAlmostEqual(ground, reported, delta=4.0)
+
+    def test_a_diagonal_bar_exposes_ends(self) -> None:
+        db, water = _diagonal_bar()
+        structure = long_structure(db, water, -18.0, 4.0, 4.0)
+        self.assertIsNotNone(structure)
+        assert structure is not None
+        self.assertIsNotNone(structure.ends)
+        assert structure.ends is not None
+        start, end = structure.ends
+        self.assertGreater(abs(start[1] - end[1]), 20.0)
+
+    def test_compact_returns_keep_the_covariance_ellipse(self) -> None:
+        db = np.full((40, 80), -16.0, dtype=np.float32)
+        water = np.zeros(db.shape, dtype=bool)
+        water[:, :6] = True
+        db[8:16, 6:14] = -2.0
+        found = waterline_returns(db, water, -18.0, 5.0, 5.0)
+        self.assertEqual(len(found), 1)
+        rows, cols = np.nonzero(found[0].mask)
+        length_m, _width_m = _axis_lengths(rows, cols, 5.0, 5.0)
+        self.assertAlmostEqual(found[0].length_m, length_m)
+
+    def test_corridor_follows_a_bright_continuation_past_the_band(self) -> None:
+        # Shoreline piece is 530 m. The aligned run past 150 m adds 410 m.
+        db, water = _shoreline_bar()
+        db[32, 64:105] = -2.0
+        structure = long_structure(db, water, -18.0, 10.0, 10.0)
+        self.assertIsNotNone(structure)
+        assert structure is not None
+        self.assertAlmostEqual(structure.length_m, 940.0, delta=47.0)
+
+    def test_corridor_skips_an_offset_blob(self) -> None:
+        db, water = _shoreline_bar()
+        db[40, 64:105] = -2.0
+        structure = long_structure(db, water, -18.0, 10.0, 10.0)
+        self.assertIsNotNone(structure)
+        assert structure is not None
+        self.assertGreater(structure.length_m, 450.0)
+        self.assertLess(structure.length_m, 750.0)
+
+    def test_corridor_stops_at_a_dark_gap(self) -> None:
+        # Four dark pixels at 10 m is 40 m, longer than the 2-pixel closing gap.
+        db, water = _shoreline_bar()
+        db[32, 68:111] = -2.0
+        structure = long_structure(db, water, -18.0, 10.0, 10.0)
+        self.assertIsNotNone(structure)
+        assert structure is not None
+        self.assertGreater(structure.length_m, 450.0)
+        self.assertLess(structure.length_m, 750.0)
+
+
+# Stored deck line from intelligence/returns.geojson. South end, then north end.
+_STORED_DECK = (
+    (-9.174131929401266, 38.68104102292412),
+    (-9.17888681141543, 38.70161252161052),
+)
+_LISBON_GRD = scene_dir(LISBON_SCENE_ID) / "grd-cog.tif"
+
+
+class LisbonStructureTest(unittest.TestCase):
+    @unittest.skipUnless(_LISBON_GRD.is_file(), "Lisbon GRD is not on disk")
+    def test_the_deck_length_and_line_match_the_stored_return(self) -> None:
+        frame = _load_frame(LISBON_SCENE_ID)
+        water, mode = water_mask(frame.db)
+        structure = long_structure(
+            frame.db, water, mode, frame.col_m, frame.row_m
+        )
+        self.assertIsNotNone(structure)
+        assert structure is not None
+        assert structure.ends is not None
+        self.assertGreaterEqual(structure.length_m, 2164.0)
+        self.assertLessEqual(structure.length_m, 2392.0)
+        self.assertGreater(structure.width_m, 80.0)
+
+        start, end = structure.ends
+        samples = _samples(start, end, 21)
+        distances = [
+            _segment_distance_m(
+                frame.grid.to_lonlat(col, row, frame.scale),
+                _STORED_DECK[0],
+                _STORED_DECK[1],
+            )
+            for col, row in samples
+        ]
+        self.assertLessEqual(float(np.median(distances)), 40.0)
+        self.assertLessEqual(max(distances), 80.0)
+
+        start_ll = frame.grid.to_lonlat(start[0], start[1], frame.scale)
+        end_ll = frame.grid.to_lonlat(end[0], end[1], frame.scale)
+        ground = metres(*start_ll, *end_ll)
+        pixel_m = max(frame.col_m, frame.row_m)
+        self.assertAlmostEqual(ground, structure.length_m, delta=pixel_m)
+
+
+def _samples(
+    start: tuple[float, float], end: tuple[float, float], count: int
+) -> list[tuple[float, float]]:
+    cols = np.linspace(start[0], end[0], count)
+    rows = np.linspace(start[1], end[1], count)
+    return list(zip(cols.tolist(), rows.tolist(), strict=True))
+
+
+def _segment_distance_m(
+    point: tuple[float, float],
+    start: tuple[float, float],
+    end: tuple[float, float],
+) -> float:
+    """Distance from a lon/lat point to a short segment, in metres."""
+
+    def frame(lon: float, lat: float) -> tuple[float, float]:
+        east = (lon - point[0]) * 111_320 * math.cos(math.radians(point[1]))
+        north = (lat - point[1]) * 110_540
+        return east, north
+
+    ax, ay = frame(*start)
+    bx, by = frame(*end)
+    abx, aby = bx - ax, by - ay
+    denom = abx * abx + aby * aby
+    if denom == 0:
+        return math.hypot(ax, ay)
+    share = max(0.0, min(1.0, (-ax * abx - ay * aby) / denom))
+    return math.hypot(ax + abx * share, ay + aby * share)
+
+
+def _diagonal_bar() -> tuple[np.ndarray, np.ndarray]:
+    """A thick bar inside the 150 m band, clearly off a constant row."""
+
+    db = np.full((120, 50), -16.0, dtype=np.float32)
+    water = np.zeros(db.shape, dtype=bool)
+    water[:, :8] = True
+    rows = np.linspace(10, 100, 300)
+    cols = np.linspace(12, 28, 300)
+    for row, col in zip(rows, cols):
+        r = int(round(float(row)))
+        c = int(round(float(col)))
+        db[r - 1 : r + 2, c - 1 : c + 2] = -2.0
+    return db, water
+
+
+def _shoreline_bar() -> tuple[np.ndarray, np.ndarray]:
+    """A 530 m return along the water, ending where the shore leaves the 150 m band."""
+
+    db = np.full((50, 160), -16.0, dtype=np.float32)
+    water = np.zeros(db.shape, dtype=bool)
+    water[10:30, 0:50] = True
+    db[32, 10:64] = -2.0
+    return db, water
 
 
 if __name__ == "__main__":
