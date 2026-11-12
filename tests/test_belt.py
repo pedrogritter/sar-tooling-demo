@@ -334,6 +334,28 @@ class SingleSceneTest(unittest.TestCase):
         self.assertIn("median", note)
         self.assertNotIn("wave", note.lower())
 
+    def test_close_half_medians_stay_one_class(self) -> None:
+        # Spread is 5 dB, so the 1.5 dB shortcut does not fire. The median
+        # cut leaves halves at -17.4 dB and -16.5 dB, about 0.9 dB apart.
+        values = np.concatenate(
+            [
+                np.full(200, -20.0),
+                np.full(300, -17.4),
+                np.full(300, -16.5),
+                np.full(200, -15.0),
+            ]
+        ).astype(np.float32)
+        db = values.reshape(20, 50)
+        water = np.ones(db.shape, dtype=bool)
+        calm, rough, note = split_roughness(db, water)
+        self.assertTrue(np.array_equal(calm, water))
+        self.assertFalse(rough.any())
+        self.assertEqual(
+            note,
+            "The two classes differ by less than 1.5 dB, "
+            "so the water is drawn as one class.",
+        )
+
     def test_a_hull_is_not_built_up_and_a_dim_land_pixel_is_not_either(self) -> None:
         water = np.zeros((40, 40), dtype=bool)
         water[:, :10] = True
@@ -371,6 +393,22 @@ class SingleSceneTest(unittest.TestCase):
         short[10:14, 6:10] = -2.0
         self.assertIsNone(long_structure(short, short_water, -18.0, 5.0, 5.0))
 
+    def test_a_return_eighty_metres_inland_does_not_count(self) -> None:
+        pixel_m = 10.0
+        db = np.full((30, 30), -16.0, dtype=np.float32)
+        water = np.zeros(db.shape, dtype=bool)
+        water[:, :1] = True
+        db[2:6, 1:5] = -2.0
+        db[20:24, 8:12] = -2.0
+        found = waterline_returns(db, water, -18.0, pixel_m, pixel_m)
+        self.assertEqual(len(found), 1)
+        self.assertLess(found[0].col, 5.0)
+
+        near = np.zeros(db.shape, dtype=bool)
+        near[2:6, 1:5] = True
+        blocked = waterline_returns(db, water, -18.0, pixel_m, pixel_m, near)
+        self.assertEqual(blocked, [])
+
     def test_a_dwell_track_is_motion_during_the_stare_not_a_route(self) -> None:
         moving = np.zeros((5, 20, 20), dtype=np.float32)
         for index in range(5):
@@ -384,6 +422,21 @@ class SingleSceneTest(unittest.TestCase):
         still[:, 8, 4] = 100
         stayed = track_returns(still, [(8.0, 4.0)], 1.0, 1.0, 10.0, 10.0)
         self.assertEqual(stayed[0]["motion"], "stationary during the dwell")
+
+        # The ridge is brighter at the original centre than along the line,
+        # and a hotter peak steps one column per frame. A window that
+        # recentered would follow that peak. The fixed window does not.
+        ridge = np.zeros((12, 16, 40), dtype=np.float32)
+        ridge[:, 8, :] = 30.0
+        ridge[:, 8, 8] = 60.0
+        for index in range(12):
+            ridge[index, 8, 8 + index] = 100.0
+        crawled = track_returns(ridge, [(8.0, 8.0)], 1.0, 1.0, 5.0, 12.0)
+        self.assertEqual(crawled[0]["motion"], "stationary during the dwell")
+        displacement = crawled[0]["displacement_m"]
+        self.assertIsInstance(displacement, float)
+        assert isinstance(displacement, float)
+        self.assertLess(displacement, 20.0)
 
     def test_open_water_record_keeps_the_shadow_limit(self) -> None:
         with tempfile.TemporaryDirectory() as raw:
