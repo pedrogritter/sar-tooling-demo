@@ -34,17 +34,44 @@ describe("stage", () => {
     }
     const waiting = stageFor("open-water", "quicklook", SCENE, false, lisbon)
     expect(waiting.src).toBe(SCENE.preview_url)
-    expect(waiting.label).toContain("Quicklook")
+    expect(waiting.label).toBe("Quicklook · 11 Feb 2026, 00:00:00 UTC")
+    expect(waiting.showSources).toBe(true)
 
     const ready = stageFor("open-water", "quicklook", SCENE, false, {
       ...lisbon,
-      overview_url:
-        "/api/scenes/ICEYE_TEST/analysis/open-water/overview.png",
+      overview_url: "/api/scenes/ICEYE_TEST/analysis/open-water/overview.png",
     })
     expect(ready.src).toBe(
       "/api/scenes/ICEYE_TEST/analysis/open-water/overview.png"
     )
     expect(ready.label).toContain("Analysis picture")
+    expect(ready.showSources).toBe(false)
+  })
+
+  it("says the library is opening when no scene is on stage yet", () => {
+    const opening = stageFor(
+      "preview",
+      "quicklook",
+      null,
+      false,
+      {
+        measurement: null,
+        briefing_html: null,
+        overview_url: null,
+      },
+      true
+    )
+    expect(opening.emptyMessage).toBe("Opening the library.")
+    expect(opening.showSources).toBe(false)
+
+    const empty = stageFor("preview", "quicklook", null, false, {
+      measurement: null,
+      briefing_html: null,
+      overview_url: null,
+    })
+    expect(empty.emptyMessage).toBe(
+      "Select a downloaded scene from the library."
+    )
   })
 
   it("does not put another tool's picture on the stage", () => {

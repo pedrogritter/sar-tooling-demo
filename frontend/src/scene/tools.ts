@@ -8,7 +8,8 @@ export const SHELL_TOOLS = [
   {
     id: "catalog",
     label: "Catalog",
-    description: "Search ICEYE open data and download a scene into this machine.",
+    description:
+      "Search ICEYE open data and download a scene into this machine.",
   },
   {
     id: "library",
@@ -19,7 +20,7 @@ export const SHELL_TOOLS = [
     id: "report",
     label: "Report",
     description:
-      "Ask a question. The tools that answer it run, and each section keeps its limit.",
+      "A full report of this scene. It runs the measurements this scene can support and writes a reading you can download.",
   },
 ] as const
 
@@ -34,13 +35,15 @@ export const ANALYSIS_TOOLS = [
     id: "sea-roughness",
     label: "Sea roughness",
     category: "Surface",
-    description: "Calm water against wind-roughened water, inside the water mask.",
+    description:
+      "Calm water against wind-roughened water, inside the water mask.",
   },
   {
     id: "built-up",
     label: "Built-up return",
     category: "Surface",
-    description: "Bright clusters on land. Fraction of land and a cluster count.",
+    description:
+      "Bright clusters on land. Fraction of land and a cluster count.",
   },
   {
     id: "returns-on-water",
@@ -65,7 +68,8 @@ export const ANALYSIS_TOOLS = [
     id: "amplitude-change",
     label: "Amplitude change",
     category: "Change",
-    description: "Earlier date in red, later date in cyan. Needs the same look.",
+    description:
+      "Earlier date in red, later date in cyan. Needs the same look.",
   },
   {
     id: "water-persistence",
@@ -137,6 +141,24 @@ export function selectTool(
   next: ToolId
 ): ToolId | null {
   return current === next ? null : next
+}
+
+/**
+ * A measurement group stays closed until the reader opens it.
+ * The group that holds the selected tool stays open.
+ */
+export function isGroupOpen(
+  category: (typeof ANALYSIS_GROUPS)[number],
+  selected: ToolId | null,
+  opened: readonly string[]
+): boolean {
+  const selectedTool = ANALYSIS_TOOLS.find((tool) => tool.id === selected)
+
+  if (selectedTool?.category === category) {
+    return true
+  }
+
+  return opened.includes(category)
 }
 
 export function toolById(id: string) {

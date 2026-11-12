@@ -1,6 +1,8 @@
 import { ImageOff } from "lucide-react"
 
+import { Button } from "@/components/ui/button"
 import { Skeleton } from "@/components/ui/skeleton"
+import type { StageSource, StageSourceChoice } from "@/scene/stage"
 
 interface ImageStageProps {
   loading: boolean
@@ -9,6 +11,9 @@ interface ImageStageProps {
   label: string
   emptyMessage: string
   media?: "image" | "video"
+  sources?: StageSourceChoice[]
+  source?: StageSource
+  onSource?: (source: StageSource) => void
 }
 
 /** The center canvas. The selected tool decides which image fills it. */
@@ -19,6 +24,9 @@ export function ImageStage({
   label,
   emptyMessage,
   media = "image",
+  sources,
+  source,
+  onSource,
 }: ImageStageProps) {
   return (
     <figure className="flex h-full min-h-0 flex-col bg-neutral-950">
@@ -53,8 +61,26 @@ export function ImageStage({
           </div>
         ) : null}
       </div>
-      <figcaption className="shrink-0 border-t border-white/10 px-3 py-2 text-xs text-neutral-300">
-        {label}
+      <figcaption className="flex shrink-0 flex-wrap items-center justify-between gap-2 border-t border-white/10 px-3 py-2">
+        <span className="min-w-0 text-xs text-neutral-300">{label}</span>
+        {sources && sources.length > 0 ? (
+          <div className="flex flex-wrap gap-1">
+            {sources.map((choice) => (
+              <Button
+                key={choice.id}
+                type="button"
+                size="xs"
+                variant={source === choice.id ? "secondary" : "outline"}
+                disabled={!choice.enabled}
+                onClick={() => {
+                  onSource?.(choice.id)
+                }}
+              >
+                {choice.label}
+              </Button>
+            ))}
+          </div>
+        ) : null}
       </figcaption>
     </figure>
   )

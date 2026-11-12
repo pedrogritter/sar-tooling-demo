@@ -3,6 +3,7 @@ import type { SceneResponse } from "@/types"
 import {
   collectFacts,
   formatBbox,
+  headerFactLine,
   formatFootprintSize,
   formatMeasure,
   formatPercent,
@@ -44,9 +45,7 @@ describe("formatters", () => {
   })
 
   it("prints a footprint size in kilometres", () => {
-    expect(formatFootprintSize([-16.95, 28.0, -16.45, 28.5])).toBe(
-      "49 × 56 km"
-    )
+    expect(formatFootprintSize([-16.95, 28.0, -16.45, 28.5])).toBe("49 × 56 km")
   })
 
   it("prints a measurement with its unit", () => {
@@ -81,6 +80,12 @@ describe("formatters", () => {
     )
     expect(facts.find((fact) => fact.label === "Bounding box")?.value).toBe(
       "-9.214, 38.660, -9.140, 38.718"
+    )
+  })
+
+  it("puts the compact facts on one header line", () => {
+    expect(headerFactLine(scene)).toBe(
+      "24 Oct 2025, 13:53:09 UTC · ICEYE-X52 · SPOTLIGHT · X · VV"
     )
   })
 

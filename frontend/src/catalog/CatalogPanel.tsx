@@ -10,7 +10,11 @@ import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { ScrollArea } from "@/components/ui/scroll-area"
-import { catalogSearchPath, EMPTY_FILTERS, type CatalogFilters } from "@/catalog/search-query"
+import {
+  catalogSearchPath,
+  EMPTY_FILTERS,
+  type CatalogFilters,
+} from "@/catalog/search-query"
 import { catalogSummary, formatBytes } from "@/lib/format"
 import type { CatalogItemDetail, CatalogSearchResponse } from "@/types"
 
@@ -93,7 +97,9 @@ export function CatalogPanel({
       const next = await fetchCatalogItem(sceneId)
       setDetail(next)
       setChecked(
-        next.assets.filter((asset) => asset.preview_default).map((asset) => asset.key)
+        next.assets
+          .filter((asset) => asset.preview_default)
+          .map((asset) => asset.key)
       )
     } catch (caught) {
       setDetailError(messageFrom(caught))
@@ -321,7 +327,8 @@ export function CatalogPanel({
                       <span className="block">{asset.title}</span>
                       <span className="text-xs text-muted-foreground">
                         {asset.key}
-                        {asset.large ? " · large" : ""} · {formatBytes(asset.bytes)}
+                        {asset.large ? " · large" : ""} ·{" "}
+                        {formatBytes(asset.bytes)}
                       </span>
                     </span>
                   </label>
@@ -376,7 +383,7 @@ function Select({
   return (
     <select
       aria-label={label}
-      className="h-8 rounded-lg border border-input bg-transparent px-2 text-sm"
+      className="h-8 rounded-lg border border-input bg-background px-2 text-sm text-foreground scheme-light"
       value={value}
       onChange={(event) => {
         onChange(event.currentTarget.value)

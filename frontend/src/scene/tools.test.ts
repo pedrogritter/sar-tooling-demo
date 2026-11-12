@@ -1,4 +1,10 @@
-import { isAnalysisTool, selectTool, toolById } from "@/scene/tools"
+import {
+  SHELL_TOOLS,
+  isAnalysisTool,
+  isGroupOpen,
+  selectTool,
+  toolById,
+} from "@/scene/tools"
 
 describe("selected tool", () => {
   it("selects a tool and closes it when the same tool is chosen again", () => {
@@ -20,5 +26,24 @@ describe("selected tool", () => {
     expect(isAnalysisTool("open-water")).toBe(true)
     expect(isAnalysisTool("dark-sea-anomaly")).toBe(true)
     expect(isAnalysisTool("catalog")).toBe(false)
+  })
+
+  it("keeps a measurement group closed until it is opened", () => {
+    expect(isGroupOpen("Surface", null, [])).toBe(false)
+    expect(isGroupOpen("Surface", null, ["Surface"])).toBe(true)
+    expect(isGroupOpen("Objects", null, ["Surface"])).toBe(false)
+  })
+
+  it("describes the report as a full report of this scene", () => {
+    const report = SHELL_TOOLS.find((tool) => tool.id === "report")
+
+    expect(report?.description).toMatch(/full report of this scene/i)
+    expect(report?.description.toLowerCase()).not.toContain("question")
+  })
+
+  it("keeps the selected tool's group open", () => {
+    expect(isGroupOpen("Surface", "open-water", [])).toBe(true)
+    expect(isGroupOpen("Objects", "open-water", [])).toBe(false)
+    expect(isGroupOpen("Surface", "catalog", [])).toBe(false)
   })
 })

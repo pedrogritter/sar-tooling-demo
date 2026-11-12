@@ -1,11 +1,7 @@
 import { useEffect, useRef, useState } from "react"
 
-import { fetchAnalysisTools } from "@/api"
 import { MeasureCard } from "@/scene/MeasureCard"
-import {
-  savedToolResult,
-  summaryFromMeasurement,
-} from "@/scene/placeholder"
+import { savedToolResult, summaryFromMeasurement } from "@/scene/placeholder"
 import { analysisRunDisabled } from "@/scene/stage"
 import { useAnalysisJob } from "@/scene/use-analysis-job"
 import type { AnalysisTool, JobResult } from "@/types"
@@ -14,6 +10,8 @@ interface AnalysisPaneProps {
   sceneId: string | null
   toolId: string
   description: string
+  tools: AnalysisTool[]
+  toolsError: string | null
   onResult: (result: JobResult) => void
 }
 
@@ -22,15 +20,14 @@ export function AnalysisPane({
   sceneId,
   toolId,
   description,
+  tools,
+  toolsError,
   onResult,
 }: AnalysisPaneProps) {
-  const [tools, setTools] = useState<AnalysisTool[]>([])
-  const [loadError, setLoadError] = useState<string | null>(null)
   const [partnerChoice, setPartnerChoice] = useState<string | null>(null)
   const [loadedScene, setLoadedScene] = useState(sceneId)
   const job = useAnalysisJob(onResult)
-  const visibleTools = sceneId === loadedScene ? tools : []
-  const tool = visibleTools.find((item) => item.id === toolId) ?? null
+  const tool = tools.find((item) => item.id === toolId) ?? null
   const partnerId =
     partnerChoice && tool?.partners.includes(partnerChoice)
       ? partnerChoice
@@ -39,38 +36,8 @@ export function AnalysisPane({
 
   if (sceneId !== loadedScene) {
     setLoadedScene(sceneId)
-    setTools([])
-    setLoadError(null)
     setPartnerChoice(null)
   }
-
-  useEffect(() => {
-    if (!sceneId) {
-      return undefined
-    }
-
-    let active = true
-    void fetchAnalysisTools(sceneId)
-      .then((response) => {
-        if (!active) {
-          return
-        }
-
-        setTools(response.tools)
-        setLoadError(null)
-      })
-      .catch((error: unknown) => {
-        if (!active) {
-          return
-        }
-
-        setLoadError(messageFrom(error))
-      })
-
-    return () => {
-      active = false
-    }
-  }, [sceneId])
 
   useEffect(() => {
     onResultRef.current = onResult
@@ -99,7 +66,7 @@ export function AnalysisPane({
   }
 
   const locked = tool?.locked ?? true
-  const reason = tool?.reason || loadError
+  const reason = tool?.reason || toolsError
   const running = job.isRunning || job.snapshot?.status === "running"
   const shown = running
     ? null
@@ -149,7 +116,11 @@ export function AnalysisPane({
             return
           }
 
-          void job.start(sceneId, toolId, tool?.needs_partner ? partnerId : null)
+          void job.start(
+            sceneId,
+            toolId,
+            tool?.needs_partner ? partnerId : null
+          )
         }}
       />
       {summary.length > 0 ? (
@@ -172,12 +143,4 @@ export function AnalysisPane({
       ) : null}
     </div>
   )
-}
-
-function messageFrom(error: unknown): string {
-  if (error instanceof Error && error.message) {
-    return error.message
-  }
-
-  return "Could not read which tools this scene can run."
 }

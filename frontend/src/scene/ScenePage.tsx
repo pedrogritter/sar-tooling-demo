@@ -3,6 +3,7 @@ import { useCallback, useEffect, useState } from "react"
 
 import {
   clearDemoData,
+  fetchAnalysisTools,
   fetchDownload,
   fetchLibrary,
   fetchSceneById,
@@ -13,13 +14,18 @@ import { LibraryPanel } from "@/catalog/LibraryPanel"
 import { Button } from "@/components/ui/button"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { useTheme } from "@/components/theme-provider"
+import { headerFactLine } from "@/lib/format"
 import { AnalysisPane } from "@/scene/AnalysisPane"
 import { demoBannerVisible } from "@/scene/placeholder"
 import { ImageStage } from "@/scene/ImageStage"
 import { MetadataOverlay } from "@/scene/MetadataOverlay"
 import { ReportView } from "@/scene/ReportView"
 import { ToolPicker } from "@/scene/ToolPicker"
-import { stageFor, type StageSource } from "@/scene/stage"
+import {
+  stageFor,
+  type StageSource,
+  type StageSourceChoice,
+} from "@/scene/stage"
 import {
   isAnalysisTool,
   selectTool,
@@ -27,6 +33,7 @@ import {
   type ToolId,
 } from "@/scene/tools"
 import type {
+  AnalysisTool,
   DownloadSnapshot,
   JobResult,
   LibraryScene,
@@ -44,7 +51,7 @@ const EMPTY_RESULT: JobResult = {
  * selected tool. Catalog and library load a scene and return to Preview.
  */
 export function ScenePage() {
-  const [tool, setTool] = useState<ToolId | null>("preview")
+  const [tool, setTool] = useState<ToolId | null>(null)
   const [scenes, setScenes] = useState<LibraryScene[]>([])
   const [libraryError, setLibraryError] = useState<string | null>(null)
   const [libraryLoading, setLibraryLoading] = useState(true)
@@ -53,7 +60,11 @@ export function ScenePage() {
   const [sceneLoading, setSceneLoading] = useState(false)
   const [results, setResults] = useState<JobResult>(EMPTY_RESULT)
   const [stageSource, setStageSource] = useState<StageSource>("quicklook")
-  const [metadataVisible, setMetadataVisible] = useState(true)
+  const [metadataVisible, setMetadataVisible] = useState(false)
+  const [analysisTools, setAnalysisTools] = useState<AnalysisTool[]>([])
+  const [analysisToolsError, setAnalysisToolsError] = useState<string | null>(
+    null
+  )
   const [download, setDownload] = useState<DownloadSnapshot | null>(null)
   const [dockExpanded, setDockExpanded] = useState(false)
   const [downloadWatch, setDownloadWatch] = useState(0)
@@ -95,7 +106,7 @@ export function ScenePage() {
   const openSceneOnStage = useCallback(
     (sceneId: string) => {
       void openScene(sceneId)
-      setTool("preview")
+      setTool(null)
     },
     [openScene]
   )
@@ -138,6 +149,43 @@ export function ScenePage() {
       active = false
     }
   }, [loadLibrary, openScene])
+
+  // One tools read for the rail locks and the open measurement pane.
+  useEffect(() => {
+    const sceneId = scene?.scene_id
+
+    if (!sceneId) {
+      setAnalysisTools([])
+      setAnalysisToolsError(null)
+      return undefined
+    }
+
+    let active = true
+    setAnalysisTools([])
+    setAnalysisToolsError(null)
+
+    void fetchAnalysisTools(sceneId)
+      .then((response) => {
+        if (!active) {
+          return
+        }
+
+        setAnalysisTools(response.tools)
+        setAnalysisToolsError(null)
+      })
+      .catch((error: unknown) => {
+        if (!active) {
+          return
+        }
+
+        setAnalysisTools([])
+        setAnalysisToolsError(messageFrom(error))
+      })
+
+    return () => {
+      active = false
+    }
+  }, [scene?.scene_id])
 
   useEffect(() => {
     let active = true
@@ -203,26 +251,78 @@ export function ScenePage() {
     }
   }, [])
 
-  const stage = stageFor(tool, stageSource, scene, sceneLoading, results)
+  const stage = stageFor(
+    tool,
+    stageSource,
+    scene,
+    sceneLoading,
+    results,
+    libraryLoading
+  )
+  const previewSources: StageSourceChoice[] = [
+    {
+      id: "quicklook",
+      label: "Quicklook",
+      enabled: Boolean(scene?.preview_url),
+    },
+    {
+      id: "thumbnail",
+      label: "Thumbnail",
+      enabled: Boolean(scene?.thumbnail_url),
+    },
+    {
+      id: "video",
+      label: "Dwell video",
+      enabled: Boolean(scene?.video_url),
+    },
+  ]
   const selected = tool ? toolById(tool) : null
 
   return (
     <div className="flex h-svh flex-col overflow-hidden bg-background">
-      <header className="flex h-12 shrink-0 items-center gap-3 border-b px-3">
-        <div className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-primary text-primary-foreground">
-          <Radar className="size-4" />
-        </div>
-        <div className="min-w-0 flex-1">
-          <h1 className="truncate text-sm font-medium tracking-tight">
-            {scene?.is_test_scene
-              ? "25 de Abril bridge"
-              : (scene?.scene_id ?? "ICEYE open data")}
-          </h1>
-          <p className="truncate font-mono text-[0.65rem] text-muted-foreground">
-            {scene?.scene_id ?? "Select a downloaded scene"}
+      <header className="grid shrink-0 grid-cols-[minmax(0,1fr)_minmax(0,auto)_minmax(0,1fr)] items-center gap-3 border-b px-3 py-2">
+        <div className="flex min-w-0 items-center gap-2">
+          <div className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-primary text-primary-foreground">
+            <Radar className="size-4" />
+          </div>
+          <p className="truncate text-sm font-medium tracking-tight">
+            ICEYE SAR TOOLKIT
           </p>
         </div>
-        <ThemeToggle />
+        <div className="max-w-xl min-w-0 text-center">
+          <p className="text-xs text-muted-foreground">Selected scene</p>
+          <h1 className="truncate text-sm font-medium tracking-tight">
+            {scene
+              ? scene.is_test_scene
+                ? "25 de Abril bridge"
+                : scene.scene_id
+              : "No scene selected"}
+          </h1>
+          {scene?.is_test_scene ? (
+            <p className="truncate font-mono text-xs text-muted-foreground">
+              {scene.scene_id}
+            </p>
+          ) : null}
+          {scene ? (
+            <button
+              type="button"
+              className="max-w-full truncate rounded-md text-xs text-muted-foreground outline-none focus-visible:ring-3 focus-visible:ring-ring/50"
+              aria-expanded={metadataVisible}
+              onClick={() => {
+                setMetadataVisible((visible) => !visible)
+              }}
+            >
+              {headerFactLine(scene)}
+            </button>
+          ) : (
+            <p className="truncate text-xs text-muted-foreground">
+              Select a downloaded scene
+            </p>
+          )}
+        </div>
+        <div className="justify-self-end">
+          <ThemeToggle />
+        </div>
       </header>
       {demoBannerVisible(scene) ? (
         <div className="flex flex-wrap items-center gap-3 border-b bg-muted px-3 py-2">
@@ -250,6 +350,7 @@ export function ScenePage() {
       <div className="flex min-h-0 flex-1 flex-col md:flex-row">
         <ToolPicker
           selected={tool}
+          tools={analysisTools}
           onSelect={(next) => {
             setResults(EMPTY_RESULT)
             setTool((current) => selectTool(current, next))
@@ -273,6 +374,9 @@ export function ScenePage() {
               label={stage.label}
               emptyMessage={stage.emptyMessage}
               media={stage.media}
+              sources={stage.showSources ? previewSources : undefined}
+              source={stageSource}
+              onSource={setStageSource}
             />
             {metadataVisible ? (
               <MetadataOverlay
@@ -283,19 +387,7 @@ export function ScenePage() {
                   setMetadataVisible(false)
                 }}
               />
-            ) : (
-              <Button
-                type="button"
-                variant="secondary"
-                size="xs"
-                className="absolute top-3 right-3 z-10"
-                onClick={() => {
-                  setMetadataVisible(true)
-                }}
-              >
-                Metadata
-              </Button>
-            )}
+            ) : null}
           </div>
         )}
 
@@ -318,12 +410,7 @@ export function ScenePage() {
               </Button>
             </div>
             {tool === "preview" ? (
-              <PreviewPane
-                scene={scene}
-                source={stageSource}
-                description={selected.description}
-                onSource={setStageSource}
-              />
+              <PreviewPane description={selected.description} />
             ) : null}
             {tool && isAnalysisTool(tool) ? (
               <ScrollArea className="flex-1">
@@ -332,6 +419,8 @@ export function ScenePage() {
                   sceneId={scene?.scene_id ?? null}
                   toolId={tool}
                   description={selected.description}
+                  tools={analysisTools}
+                  toolsError={analysisToolsError}
                   onResult={(result) => {
                     setResults({
                       ...result,
@@ -371,6 +460,7 @@ export function ScenePage() {
       <DownloadDock
         snapshot={download}
         expanded={dockExpanded}
+        openSceneId={scene?.scene_id ?? null}
         onToggle={() => {
           setDockExpanded((value) => !value)
         }}
@@ -378,52 +468,16 @@ export function ScenePage() {
           setDownload(null)
           setDockExpanded(false)
         }}
+        onOpen={openSceneOnStage}
       />
     </div>
   )
 }
 
-function PreviewPane({
-  scene,
-  source,
-  description,
-  onSource,
-}: {
-  scene: SceneResponse | null
-  source: StageSource
-  description: string
-  onSource: (source: StageSource) => void
-}) {
-  const choices: { id: StageSource; label: string; enabled: boolean }[] = [
-    {
-      id: "quicklook",
-      label: "Quicklook",
-      enabled: Boolean(scene?.preview_url),
-    },
-    {
-      id: "thumbnail",
-      label: "Thumbnail",
-      enabled: Boolean(scene?.thumbnail_url),
-    },
-    { id: "video", label: "Dwell video", enabled: Boolean(scene?.video_url) },
-  ]
-
+function PreviewPane({ description }: { description: string }) {
   return (
     <div className="flex flex-col gap-3 p-3">
       <p className="text-sm text-muted-foreground">{description}</p>
-      {choices.map((choice) => (
-        <Button
-          key={choice.id}
-          type="button"
-          variant={source === choice.id ? "secondary" : "outline"}
-          disabled={!choice.enabled}
-          onClick={() => {
-            onSource(choice.id)
-          }}
-        >
-          {choice.label}
-        </Button>
-      ))}
     </div>
   )
 }

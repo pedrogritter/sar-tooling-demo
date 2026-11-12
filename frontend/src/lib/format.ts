@@ -142,6 +142,25 @@ export function measurementNumber(
   return typeof value === "number" && Number.isFinite(value) ? value : null
 }
 
+const HEADER_FACT_LABELS = [
+  "Collected",
+  "Platform",
+  "Mode",
+  "Band",
+  "Polarization",
+] as const
+
+/** One line for the shell header: time, platform, mode, band, polarization. */
+export function headerFactLine(scene: SceneResponse): string {
+  const facts = collectFacts(scene)
+
+  return HEADER_FACT_LABELS.map(
+    (label) => facts.find((fact) => fact.label === label)?.value ?? ""
+  )
+    .filter((value) => value.length > 0)
+    .join(" · ")
+}
+
 export function collectFacts(scene: SceneResponse): Fact[] {
   const polarization =
     scene.polarizations.length > 0
