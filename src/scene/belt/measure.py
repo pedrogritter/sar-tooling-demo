@@ -143,7 +143,12 @@ def water_mask(db: np.ndarray) -> tuple[np.ndarray, float]:
 def split_roughness(
     db: np.ndarray, water: np.ndarray
 ) -> tuple[np.ndarray, np.ndarray, str]:
-    """Split water into calm and wind-roughened. A flat sea stays one class."""
+    """Split water into calm and wind-roughened. A flat sea stays one class.
+
+    The 10th-to-90th spread is the first gate. After a median cut, halves
+    whose medians differ by less than 1.5 dB are still one sea: the spread
+    was the tails, not two classes.
+    """
 
     calm = np.zeros(db.shape, dtype=bool)
     rough = np.zeros(db.shape, dtype=bool)
@@ -164,6 +169,19 @@ def split_roughness(
     middle = float(np.median(values))
     calm = water & (db <= middle)
     rough = water & (db > middle)
+    calm_values = db[calm]
+    rough_values = db[rough]
+    if calm_values.size and rough_values.size:
+        calm_median = float(np.median(calm_values))
+        rough_median = float(np.median(rough_values))
+        # A 0.9 dB gap between the halves is not a wind split.
+        if abs(calm_median - rough_median) < 1.5:
+            return (
+                water.copy(),
+                np.zeros(db.shape, dtype=bool),
+                "The two classes differ by less than 1.5 dB, "
+                "so the water is drawn as one class.",
+            )
     return calm, rough, f"The split is the median water return, {middle:.1f} dB."
 
 
@@ -208,11 +226,16 @@ def waterline_returns(
     row_m: float,
     excluded: np.ndarray | None = None,
 ) -> list[Component]:
-    """Compact bright components that touch the water."""
+    """Compact bright components that touch the water.
+
+    A component counts when at least one pixel is within one overview pixel
+    of the water mask. The brightest 24 are a last bound after that test,
+    not the test that drops the hillside.
+    """
 
     pixel_m = max(min(col_m, row_m), 1e-3)
     distance = ndimage.distance_transform_edt(~water) * pixel_m
-    bright = (db >= mode_db + 8.0) & (distance <= 80) & np.isfinite(db)
+    bright = (db >= mode_db + 8.0) & np.isfinite(db)
     if excluded is not None:
         bright &= ~excluded
     labels, count = ndimage.label(bright)
@@ -224,6 +247,9 @@ def waterline_returns(
         mask = np.zeros(db.shape, dtype=bool)
         local = labels[window] == index
         mask[window] = local
+        # Metres inland from the water. One overview pixel is the touch test.
+        if not np.any(distance[mask] <= pixel_m):
+            continue
         area = float(mask.sum()) * col_m * row_m
         if area < minimum:
             continue
@@ -254,27 +280,33 @@ def track_returns(
     pixel_m: float,
     dwell_s: float,
 ) -> list[dict[str, object]]:
-    """Follow each centre across the dwell. Displacement uses the first and last hit."""
+    """Follow each centre across the dwell. Displacement uses the first and last hit.
+
+    Every frame is searched in the window around the original centre.
+    Recentering on the peak crawls along a bright ridge and paints that
+    ridge as motion. A track is moved only when first-to-last displacement
+    clears the gate.
+    """
 
     frames = int(video.shape[0])
     radius = 6
     tracks: list[dict[str, object]] = []
     for row, col in centres:
-        current_row = row * row_scale
-        current_col = col * col_scale
+        origin_row = row * row_scale
+        origin_col = col * col_scale
         points: list[tuple[float, float]] = []
         for index in range(frames):
-            r0 = max(0, int(current_row) - radius)
-            r1 = min(int(video.shape[1]), int(current_row) + radius + 1)
-            c0 = max(0, int(current_col) - radius)
-            c1 = min(int(video.shape[2]), int(current_col) + radius + 1)
+            r0 = max(0, int(origin_row) - radius)
+            r1 = min(int(video.shape[1]), int(origin_row) + radius + 1)
+            c0 = max(0, int(origin_col) - radius)
+            c1 = min(int(video.shape[2]), int(origin_col) + radius + 1)
             window = video[index, r0:r1, c0:c1]
             if window.size == 0:
                 continue
             peak = np.unravel_index(int(np.argmax(window)), window.shape)
-            current_row = r0 + float(peak[0])
-            current_col = c0 + float(peak[1])
-            points.append((current_row / row_scale, current_col / col_scale))
+            hit_row = r0 + float(peak[0])
+            hit_col = c0 + float(peak[1])
+            points.append((hit_row / row_scale, hit_col / col_scale))
         if len(points) < 2:
             tracks.append(
                 {
@@ -289,7 +321,7 @@ def track_returns(
         displacement = float(
             np.hypot((end[0] - start[0]) * pixel_m, (end[1] - start[1]) * pixel_m)
         )
-        moved = displacement >= max(8.0, pixel_m * 2)
+        moved = displacement >= max(20.0, pixel_m * 4)
         speed = displacement / dwell_s if dwell_s > 0 else 0.0
         tracks.append(
             {

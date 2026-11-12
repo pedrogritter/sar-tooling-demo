@@ -348,7 +348,11 @@ def _run_motion(scene_id: str, on_step: OnStep) -> None:
     dwell_s = dwell_seconds(stac_props) or 1.0
     on_step(3, sentences[2])
     water, mode = water_mask(frame.db)
-    returns = waterline_returns(frame.db, water, mode, frame.col_m, frame.row_m)
+    structure = long_structure(frame.db, water, mode, frame.col_m, frame.row_m)
+    excluded = structure.mask if structure is not None else None
+    returns = waterline_returns(
+        frame.db, water, mode, frame.col_m, frame.row_m, excluded
+    )
     centres: list[tuple[float, float]] = []
     for item in returns:
         lon, lat = frame.grid.to_lonlat(item.col, item.row, frame.scale)
