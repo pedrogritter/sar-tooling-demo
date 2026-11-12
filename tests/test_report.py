@@ -24,6 +24,8 @@ from scene.belt.run import LIMITS
 from scene.catalog import CatalogRecord
 from scene.paths import LISBON_SCENE_ID, project_root
 from scene.report.chains import (
+    NARRATOR_SYSTEM,
+    SYNTHESIS_SYSTEM,
     OrderChoice,
     ReportChains,
     chains_or_none,
@@ -659,6 +661,8 @@ class ReportChainsTests(unittest.TestCase):
             self.assertIn(expected, prompt)
         self.assertNotIn("overview-url-leak", prompt)
         self.assertNotIn(".png", prompt)
+        self.assertNotIn("humorous", prompt)
+        self.assertNotIn("humorous", NARRATOR_SYSTEM)
 
     def test_synthesis_prompt_carries_rows_limits_failures_locks_and_the_glossary(
         self,
@@ -734,8 +738,34 @@ class ReportChainsTests(unittest.TestCase):
             ".tif",
             ".png",
             "No detector labelled this frame.",
+            "stack of only two dates",
         ):
             self.assertNotIn(leak, prompt)
+        self.assertNotIn("stack of only two dates", SYNTHESIS_SYSTEM)
+        for banned in ("two dates", "second date", "stack", "partner", "cause"):
+            self.assertNotIn(banned, SYNTHESIS_SYSTEM)
+
+    def test_single_scene_synthesis_prompt_does_not_invite_a_second_date(
+        self,
+    ) -> None:
+        model = FakeChatModel(text="A hedged reading.")
+        ReportChains(model, self.narrator).synthesize(
+            self.facts,
+            None,
+            [],
+            "Sigma-nought is radar brightness.",
+            stack_scope=None,
+            matched_dates=None,
+        )
+        prompt = model.prompt_text()
+        self.assertIn(
+            "Do not mention a second date, a stack, a partner, or a cause.",
+            prompt,
+        )
+        self.assertNotIn("stack of only two dates", prompt)
+        self.assertNotIn("partner_id", prompt)
+        self.assertNotIn("stack_scope", prompt)
+        self.assertNotIn("matched_dates", prompt)
 
 
 if __name__ == "__main__":

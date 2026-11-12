@@ -45,7 +45,7 @@ ORDER_SYSTEM = (
 )
 
 NARRATOR_SYSTEM = (
-    "You write one or two humorous sentences shown while one radar tool runs. "
+    "You write one or two sentences shown while one radar tool runs. "
     "Name the scene mode. "
     "Talk about the work this tool is doing, such as dark water, bright clusters, "
     "or a second date. "
@@ -56,11 +56,12 @@ NARRATOR_SYSTEM = (
 
 SYNTHESIS_SYSTEM = (
     "You write the lead of one radar scene report. "
-    "You are given the scene, an optional partner scene, every tool summary, "
+    "You are given the scene, every tool summary, "
     "every limit, the failures, the lock reasons, and a glossary. "
-    "State the numbers with their units. "
-    "Give a hedged reading of what those numbers support, and of what may have "
-    "gone wrong: a limit that applies, a failed tool, or a stack of only two dates. "
+    "For a tool whose status is done, state its summary numbers with their "
+    "units and its limit sentence. "
+    "Give a hedged reading of what those numbers support, and name a limit "
+    "that applies or a tool that failed. "
     "When you use a jargon word, pair it with a plain hint in the same sentence. "
     "The glossary is the only extra wording you may use. "
     "Do not name a ship, a spill, a tide height, or a building height. "
@@ -219,20 +220,31 @@ def _synthesis_request(
     stack_scope: str | None,
     matched_dates: int | None,
 ) -> str:
-    """Facts, results, and the glossary. Picture paths are not included."""
+    """Facts, results, and the glossary. Picture paths are not included.
+
+    A run with no partner and no matched-date count is told not to invent a
+    second date, a stack, a partner, or a cause. Those fields are omitted
+    from the payload so the invitation is not in the prompt.
+    """
 
     payload: dict[str, object] = {
         "scene": {**_scene_fields(facts), "overview_metres": _overview(facts)},
-        "partner_id": partner_id,
-        "matched_dates": matched_dates,
-        "stack_scope": stack_scope,
         "results": [_result_row(section) for section in sections],
     }
+    grounded = partner_id is not None or matched_dates is not None
+    if grounded:
+        payload["partner_id"] = partner_id
+        payload["matched_dates"] = matched_dates
+        payload["stack_scope"] = stack_scope
     parts = [f"Results:\n{_dump(payload)}", f"Glossary:\n{glossary}"]
     if stack_scope:
         parts.append(
             "Include this sentence, unchanged, because the stack tools compare "
             f"every matched date: {stack_scope}"
+        )
+    elif not grounded:
+        parts.append(
+            "Do not mention a second date, a stack, a partner, or a cause."
         )
     return "\n\n".join(parts)
 
