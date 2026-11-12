@@ -1,0 +1,16 @@
+{
+  "tool_id": "built-up",
+  "scene_id": "ICEYE_EYCKP5_20251024T135309Z_6724574_X52_SLF",
+  "partner_id": null,
+  "summary": [
+    {
+      "label": "Built-up fraction of land",
+      "value": "0.092"
+    },
+    {
+      "label": "Clusters",
+      "value": "20"
+    }
+  ],
+  "limit": "Brightness is a double-bounce return. It is not a building height and it is not a residential or industrial class."
+}

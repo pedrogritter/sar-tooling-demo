@@ -1,0 +1,20 @@
+{
+  "tool_id": "dwell-motion",
+  "scene_id": "ICEYE_EYCKP5_20251024T135309Z_6724574_X52_SLF",
+  "partner_id": null,
+  "summary": [
+    {
+      "label": "Returns tracked",
+      "value": "0"
+    },
+    {
+      "label": "Moved during the dwell",
+      "value": "0"
+    },
+    {
+      "label": "Dwell",
+      "value": "14.4 s"
+    }
+  ],
+  "limit": "The stare is the length of this collect. A track is motion during those seconds, not a route."
+}

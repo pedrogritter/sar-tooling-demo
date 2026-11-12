@@ -31,7 +31,9 @@ class DemoSeedTest(unittest.TestCase):
             root = Path(raw)
             seed = root / "seed"
             data = root / "data"
-            write_seed(seed)
+            # demo/lisbon is the committed scene. This test draws the
+            # placeholder that remains only when that tree is missing.
+            write_seed(seed, root / "absent")
             self.assertTrue(seed_if_needed(data, seed))
             folder = data / "scenes" / LISBON_SCENE_ID
             stac = (folder / "stac.json").read_text(encoding="utf-8")
@@ -85,7 +87,7 @@ class DemoSeedTest(unittest.TestCase):
             self.assertFalse((folder / "demo.json").exists())
 
             seed = root / "seed"
-            write_seed(seed)
+            write_seed(seed, root / "absent")
             occupied = root / "occupied"
             scene = occupied / "scenes" / LISBON_SCENE_ID
             scene.mkdir(parents=True)
@@ -107,7 +109,7 @@ class DemoSeedTest(unittest.TestCase):
     def test_saved_tool_and_quicklook(self) -> None:
         with tempfile.TemporaryDirectory() as raw:
             dest = Path(raw)
-            write_seed(dest)
+            write_seed(dest, dest / "absent")
             folder = dest / "scenes" / LISBON_SCENE_ID
             scene = load_scene(folder / "stac.json")
             self.assertEqual(scene.scene_id, LISBON_SCENE_ID)
@@ -147,7 +149,7 @@ class DemoSeedTest(unittest.TestCase):
     def test_clear_route_removes_only_the_placeholder(self) -> None:
         with tempfile.TemporaryDirectory() as raw:
             data = Path(raw)
-            write_seed(data)
+            write_seed(data, data / "absent")
             state = build_state()
             with patch("scene.demo.data_dir", lambda: data):
                 rejected = dispatch(

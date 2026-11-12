@@ -1,0 +1,20 @@
+{
+  "tool_id": "long-structure",
+  "scene_id": "ICEYE_EYCKP5_20251024T135309Z_6724574_X52_SLF",
+  "partner_id": null,
+  "summary": [
+    {
+      "label": "Length",
+      "value": "2358 m"
+    },
+    {
+      "label": "Width",
+      "value": "126 m"
+    },
+    {
+      "label": "Peak sigma-nought",
+      "value": "19.3 dB"
+    }
+  ],
+  "limit": "The length is the bright return, layover included. An empty class is a valid result."
+}

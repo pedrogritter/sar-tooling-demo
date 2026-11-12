@@ -1,0 +1,16 @@
+{
+  "tool_id": "sea-roughness",
+  "scene_id": "ICEYE_EYCKP5_20251024T135309Z_6724574_X52_SLF",
+  "partner_id": null,
+  "summary": [
+    {
+      "label": "Water area",
+      "value": "8.25 km\u00b2"
+    },
+    {
+      "label": "Split",
+      "value": "none"
+    }
+  ],
+  "limit": "This split is roughness, not a wave period, a wave height, or a current."
+}

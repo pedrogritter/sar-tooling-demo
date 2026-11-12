@@ -13,8 +13,8 @@ from unittest.mock import patch
 import numpy as np
 import tifffile
 
-from scene.belt.catalog import tools_for_scene
-from scene.belt.geometry import INCIDENCE_TOLERANCE, Grid, warp_affine
+from scene.belt.catalog import ToolView, tools_for_scene
+from scene.belt.geometry import INCIDENCE_TOLERANCE, warp_affine
 from scene.belt.measure import (
     _axis_lengths,
     built_up_mask,
@@ -34,7 +34,7 @@ from scene.belt.stack import (
     shoreline,
     site_activity,
 )
-from scene.grid import metres
+from scene.grid import Grid, metres
 from scene.paths import LISBON_SCENE_ID, scene_dir
 
 
@@ -415,7 +415,10 @@ class SingleSceneTest(unittest.TestCase):
             moving[index, 8, 4 + index] = 100
         moved = track_returns(moving, [(8.0, 4.0)], 1.0, 1.0, 10.0, 10.0)
         self.assertEqual(moved[0]["motion"], "moved")
-        self.assertGreater(float(moved[0]["displacement_m"]), 20)
+        moved_m = moved[0]["displacement_m"]
+        self.assertIsInstance(moved_m, float)
+        assert isinstance(moved_m, float)
+        self.assertGreater(moved_m, 20)
         self.assertNotIn("route", str(moved[0]["motion"]))
 
         still = np.zeros((5, 20, 20), dtype=np.float32)
@@ -566,7 +569,7 @@ class EligibilityTest(unittest.TestCase):
     def _partners(self, root: Path, scene_id: str) -> tuple[str, ...]:
         return self._views(root, scene_id)["amplitude-change"].partners
 
-    def _views(self, root: Path, scene_id: str):
+    def _views(self, root: Path, scene_id: str) -> dict[str, ToolView]:
         with patch("scene.belt.catalog.scene_dir", _rooted(root)):
             return {item.id: item for item in tools_for_scene(scene_id)}
 

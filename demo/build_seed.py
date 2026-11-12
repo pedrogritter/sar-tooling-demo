@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-from pathlib import Path
-
 from scene.demo import write_seed
 from scene.paths import project_root
 

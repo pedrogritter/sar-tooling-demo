@@ -1,0 +1,12 @@
+{
+  "tool_id": "returns-on-water",
+  "scene_id": "ICEYE_EYCKP5_20251024T135309Z_6724574_X52_SLF",
+  "partner_id": null,
+  "summary": [
+    {
+      "label": "Bright returns",
+      "value": "0"
+    }
+  ],
+  "limit": "A row is a bright radar return. A hull, a pier, and a platform all qualify."
+}

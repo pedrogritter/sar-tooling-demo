@@ -17,7 +17,7 @@ from unittest.mock import patch
 from PIL import Image
 
 from scene.jobs import MeasurementJobManager
-from scene.web import AppState, build_state, dispatch, make_handler
+from scene.web import AppState, HttpResponse, build_state, dispatch, make_handler
 from tests.test_belt import OpenWaterPictureTest, _rooted
 
 SCENE_ID = "ICEYE_EYCKP5_20251024T135309Z_6724574_X52_SLF"
@@ -203,7 +203,7 @@ class AnalysisRouteTest(unittest.TestCase):
         tool_id: str,
         manager: MeasurementJobManager | None = None,
         partner_id: str | None = None,
-    ):
+    ) -> HttpResponse:
         payload: dict[str, str] = {"scene_id": scene_id, "tool_id": tool_id}
         if partner_id is not None:
             payload["partner_id"] = partner_id

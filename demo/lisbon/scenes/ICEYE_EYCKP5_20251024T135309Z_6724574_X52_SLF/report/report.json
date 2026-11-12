@@ -1,0 +1,176 @@
+{
+  "scene_id": "ICEYE_EYCKP5_20251024T135309Z_6724574_X52_SLF",
+  "question": "",
+  "partner_id": null,
+  "phase": "done",
+  "tool_order": [
+    "open-water",
+    "returns-on-water",
+    "sea-roughness",
+    "long-structure",
+    "built-up",
+    "dwell-motion"
+  ],
+  "synthesis_md": "In the radar scene report for the specified collection, the tool \"open-water\" has a status of done, reporting a water area of 8.25 km\u00b2, a water fraction of 0.332, and a median sigma-nought of -17.1 dB. The limit states that shadow, tarmac, and sand are dark for the same reason, indicating that flooded vegetation and flooded streets appear brighter, thus marking them as dry. These numbers suggest that there is a significant presence of open water, although the median sigma-nought indicates a relatively darker surface, which could imply the presence of features like vegetation or other anomalies. A relevant limit that applies here is the open water limit.",
+  "synthesis_source": "model",
+  "sections": [
+    {
+      "tool_id": "open-water",
+      "status": "done",
+      "measurement": {
+        "tool_id": "open-water",
+        "scene_id": "ICEYE_EYCKP5_20251024T135309Z_6724574_X52_SLF",
+        "partner_id": null,
+        "summary": [
+          {
+            "label": "Water area",
+            "value": "8.25 km\u00b2"
+          },
+          {
+            "label": "Water fraction",
+            "value": "0.332"
+          },
+          {
+            "label": "Median sigma-nought",
+            "value": "-17.1 dB"
+          }
+        ],
+        "limit": "Shadow, tarmac, and sand are dark for the same reason. Flooded vegetation and flooded streets get brighter, so this mask marks them dry."
+      },
+      "briefing_md": "# Open water\n\nShadow, tarmac, and sand are dark for the same reason. Flooded vegetation and flooded streets get brighter, so this mask marks them dry.\n\n- Water area: 8.25 km\u00b2\n- Water fraction: 0.332\n- Median sigma-nought: -17.1 dB\n",
+      "briefing_source": "belt",
+      "overview_url": "/api/scenes/ICEYE_EYCKP5_20251024T135309Z_6724574_X52_SLF/analysis/open-water/overview.png",
+      "partner_id": null,
+      "progress_note": "Measuring Open water on this spotlight scene."
+    },
+    {
+      "tool_id": "returns-on-water",
+      "status": "done",
+      "measurement": {
+        "tool_id": "returns-on-water",
+        "scene_id": "ICEYE_EYCKP5_20251024T135309Z_6724574_X52_SLF",
+        "partner_id": null,
+        "summary": [
+          {
+            "label": "Bright returns",
+            "value": "0"
+          }
+        ],
+        "limit": "A row is a bright radar return. A hull, a pier, and a platform all qualify."
+      },
+      "briefing_md": "# Returns on water\n\nA row is a bright radar return. A hull, a pier, and a platform all qualify.\n\n- Bright returns: 0\n",
+      "briefing_source": "belt",
+      "overview_url": "/api/scenes/ICEYE_EYCKP5_20251024T135309Z_6724574_X52_SLF/analysis/returns-on-water/overview.png",
+      "partner_id": null,
+      "progress_note": "Measuring Returns on water on this spotlight scene."
+    },
+    {
+      "tool_id": "sea-roughness",
+      "status": "done",
+      "measurement": {
+        "tool_id": "sea-roughness",
+        "scene_id": "ICEYE_EYCKP5_20251024T135309Z_6724574_X52_SLF",
+        "partner_id": null,
+        "summary": [
+          {
+            "label": "Water area",
+            "value": "8.25 km\u00b2"
+          },
+          {
+            "label": "Split",
+            "value": "none"
+          }
+        ],
+        "limit": "This split is roughness, not a wave period, a wave height, or a current."
+      },
+      "briefing_md": "# Sea roughness\n\nThis split is roughness, not a wave period, a wave height, or a current.\n\n- Water area: 8.25 km\u00b2\n- Split: none\n",
+      "briefing_source": "belt",
+      "overview_url": "/api/scenes/ICEYE_EYCKP5_20251024T135309Z_6724574_X52_SLF/analysis/sea-roughness/overview.png",
+      "partner_id": null,
+      "progress_note": "Measuring Sea roughness on this spotlight scene."
+    },
+    {
+      "tool_id": "long-structure",
+      "status": "done",
+      "measurement": {
+        "tool_id": "long-structure",
+        "scene_id": "ICEYE_EYCKP5_20251024T135309Z_6724574_X52_SLF",
+        "partner_id": null,
+        "summary": [
+          {
+            "label": "Length",
+            "value": "2358 m"
+          },
+          {
+            "label": "Width",
+            "value": "126 m"
+          },
+          {
+            "label": "Peak sigma-nought",
+            "value": "19.3 dB"
+          }
+        ],
+        "limit": "The length is the bright return, layover included. An empty class is a valid result."
+      },
+      "briefing_md": "# Long structure\n\nThe length is the bright return, layover included. An empty class is a valid result.\n\n- Length: 2358 m\n- Width: 126 m\n- Peak sigma-nought: 19.3 dB\n",
+      "briefing_source": "belt",
+      "overview_url": "/api/scenes/ICEYE_EYCKP5_20251024T135309Z_6724574_X52_SLF/analysis/long-structure/overview.png",
+      "partner_id": null,
+      "progress_note": "Measuring Long structure on this spotlight scene."
+    },
+    {
+      "tool_id": "built-up",
+      "status": "done",
+      "measurement": {
+        "tool_id": "built-up",
+        "scene_id": "ICEYE_EYCKP5_20251024T135309Z_6724574_X52_SLF",
+        "partner_id": null,
+        "summary": [
+          {
+            "label": "Built-up fraction of land",
+            "value": "0.092"
+          },
+          {
+            "label": "Clusters",
+            "value": "20"
+          }
+        ],
+        "limit": "Brightness is a double-bounce return. It is not a building height and it is not a residential or industrial class."
+      },
+      "briefing_md": "# Built-up return\n\nBrightness is a double-bounce return. It is not a building height and it is not a residential or industrial class.\n\n- Built-up fraction of land: 0.092\n- Clusters: 20\n",
+      "briefing_source": "belt",
+      "overview_url": "/api/scenes/ICEYE_EYCKP5_20251024T135309Z_6724574_X52_SLF/analysis/built-up/overview.png",
+      "partner_id": null,
+      "progress_note": "Measuring Built-up return on this spotlight scene."
+    },
+    {
+      "tool_id": "dwell-motion",
+      "status": "done",
+      "measurement": {
+        "tool_id": "dwell-motion",
+        "scene_id": "ICEYE_EYCKP5_20251024T135309Z_6724574_X52_SLF",
+        "partner_id": null,
+        "summary": [
+          {
+            "label": "Returns tracked",
+            "value": "0"
+          },
+          {
+            "label": "Moved during the dwell",
+            "value": "0"
+          },
+          {
+            "label": "Dwell",
+            "value": "14.4 s"
+          }
+        ],
+        "limit": "The stare is the length of this collect. A track is motion during those seconds, not a route."
+      },
+      "briefing_md": "# Dwell motion\n\nThe stare is the length of this collect. A track is motion during those seconds, not a route.\n\n- Returns tracked: 0\n- Moved during the dwell: 0\n- Dwell: 14.4 s\n",
+      "briefing_source": "belt",
+      "overview_url": "/api/scenes/ICEYE_EYCKP5_20251024T135309Z_6724574_X52_SLF/analysis/dwell-motion/overview.png",
+      "partner_id": null,
+      "progress_note": "Measuring Dwell motion on this spotlight scene."
+    }
+  ]
+}

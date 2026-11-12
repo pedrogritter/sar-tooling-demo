@@ -13,7 +13,7 @@ Collected 24 October 2025, 13:53 UTC, by ICEYE-X52. Spotlight, X-band, VV. The f
 | `src/scene/` | Python package: fetch the STAC assets, measure them, and serve the page |
 | `frontend/` | Vite and React page. Node 26.13.0. `pnpm --dir frontend build` writes `frontend/dist` |
 | `Dockerfile`, `docker-compose.yml` | One image and one command. Radar files stay on the volume |
-| `demo/build_seed.py` | Draws the placeholder scene the container copies on an empty volume |
+| `demo/build_seed.py` | Copies the committed Lisbon tree, or draws the placeholder when `demo/lisbon` is missing |
 | `content/scene_note.md` | Person-written note shown on the fallback page |
 | `data/` | Downloaded scenes in `data/scenes/<id>/`, plus the catalog index. Gitignored |
 | `intelligence/` | Measurement outputs. `overview.png` is gitignored |
@@ -27,9 +27,9 @@ From a fresh clone, one command builds the image and serves the page:
 docker compose up --build
 ```
 
-Open http://127.0.0.1:8765. The image does not contain radar files. The first start copies a labeled placeholder of the Lisbon test scene into a Docker volume: a drawn quicklook, and saved results for five analysis tools. The banner says those pictures and numbers were not measured from an ICEYE raster. **Clear demo data** removes the pictures and leaves the STAC record. It does not come back on the next start while that record is there. If the record is removed and the scene folder is empty, the next start seeds again. A folder that already has files is not overwritten. A catalog download or `python -m scene.fetch` of that same scene removes the placeholder when the download finishes. A failed download leaves it in place. `docker compose down -v` deletes the volume, and the next `up` seeds again.
+Open http://127.0.0.1:8765. `docker compose up` copies the committed Lisbon preview, thumbnail, dwell video, and analysis results. It does not contain a GRD, an SLC, a colorized image, a dwell stack, or a quicklook COG. The drawn placeholder remains only when `demo/lisbon` is missing. That drawing writes `demo.json`, and the banner says those pictures and numbers were not measured from an ICEYE raster. **Clear demo data** removes the pictures and leaves the STAC record. It does not come back on the next start while that record is there. If the record is removed and the scene folder is empty, the next start seeds again. A folder that already has files is not overwritten. A catalog download or `python -m scene.fetch` of that same scene removes the placeholder when the download finishes. A failed download leaves it in place. `docker compose down -v` deletes the volume, and the next `up` seeds again.
 
-To let the report order the tools, narrate each step, and write the lead, set `OPENAI_API_KEY` before `docker compose up`. Compose reads it from the shell or from a gitignored `.env` next to `docker-compose.yml` and passes it into the container. The image build does not take the key. If it is missing, the report page asks for a key and keeps it in that server process only. Restarting the container clears a key entered on the page. A key set in the environment is not replaced from the page. The page does not ask for a question. Start runs the tools the scene can support.
+Set `OPENAI_API_KEY` before `docker compose up` when the model should order the tools and write the lead. Compose reads it from the shell or from a gitignored `.env` next to `docker-compose.yml` and passes it into the container. The image build does not take the key. If it is missing, Start still measures and the lead is built from the summary rows. The report page can keep a key in that server process only. Restarting the container clears a key entered on the page. A key set in the environment is not replaced from the page. The page does not ask for a question. Start runs the tools the scene can support.
 
 `SCENE_HOST` is `0.0.0.0` inside the container. The published port is 8765.
 
@@ -51,7 +51,7 @@ From inside `src/`, the same `python` does find the folder named `scene`, becaus
 
 Open http://127.0.0.1:8765. `SCENE_HOST` and `SCENE_PORT` change that address. The product command is `.venv/bin/python -m scene.serve`. `pnpm --dir frontend build` writes `frontend/dist`, and the Python process serves that page.
 
-The page is one canvas. The header has the radar mark and Open data on the left, and the selected scene in the center. A labeled tool column sits on the left, the selected scene fills the stage, and the chosen tool opens one pane on the right. The pane starts closed. The caption chooses the quicklook, thumbnail, or dwell video. Measurement groups are disclosures and start collapsed. Each measurement has an icon, and a tool the scene cannot run shows a lock. Catalog and Library search and open scenes. The center facts line opens the rest of the fields on the picture. A download lists each file and its byte count along the bottom, and offers Open when that scene is not already on stage. Click the same tool, Close, or Escape to shut the pane.
+The page is one canvas. The header has the radar mark and Open data on the left, and the selected scene in the center. A labeled tool column sits on the left, the selected scene fills the stage, and the chosen tool opens one pane on the right. The pane starts closed. The caption chooses the quicklook, thumbnail, or video. Measurement groups are disclosures and start collapsed. Each measurement has an icon, and a tool the scene cannot run shows a lock. Catalog and Library search and open scenes. The center facts line opens the rest of the fields on the picture. A download lists each file and its byte count along the bottom, and offers Open when that scene is not already on stage. Click the same tool, Close, or Escape to shut the pane.
 
 `.venv/bin/python -m scene.fetch` saves the Lisbon test scene under `data/scenes/<id>/`: the STAC record, the thumbnail, the quicklook, and the dwell video. `.venv/bin/python -m scene.fetch --all` also streams the GRD (about 484 MB), the colorized sub-aperture image (about 1.2 GB), the georeferenced dwell stack (about 827 MB), and the SLC (about 11 GB). The catalogue URL for that test scene lives in `src/scene/fetch.py`. A flat `data/stac.json` checkout is moved into the scene folder on startup, so files already on disk are not fetched again.
 
@@ -59,7 +59,7 @@ The catalog tool searches the [ICEYE open data collection](https://iceye-open-da
 
 When `frontend/dist/index.html` is missing, `GET /` serves the original Python page: the quicklook, the STAC fields, and the person-written `content/scene_note.md`. When the build exists, choosing a scene shows its quicklook until an analysis picture replaces it.
 
-The measure control in the tool column is the analysis belt. Each tool reads rasters already on disk and draws a decibel picture with a legend. A tool the scene cannot support stays in the belt and names the missing file or the missing second look. The older Lisbon-only job is still available as `POST /api/jobs/measure`.
+The measure control in the tool column is the analysis belt. Each tool reads rasters already on disk and draws a decibel picture with a legend. A tool the scene cannot support stays in the belt and names the missing file or the missing second look. Change and stack stay locked because the open catalog has no second look on this bridge. The older Lisbon-only job is still available as `POST /api/jobs/measure`.
 
 The same measurement from the shell, for the Lisbon test scene only:
 
@@ -89,10 +89,10 @@ The quicklook, the STAC fields printed beside it, the measurement numbers, the o
 - More than one open-data scene can be stored under `data/scenes/`. The bridge measurement runs only on the Lisbon test scene. Amplitude change compares two calibrated scenes of the same look and reports area that differs by at least 3 dB in a patch of at least 8 pixels. It does not name a flood or a vessel. No map library. The quicklook stays in the product's own pixel orientation. No ICAS purchase.
 - Python here is this reader, this job, and this page. It is not a large service other people depend on.
 - No Kubernetes. No air-gapped or classified deploy. Files already on disk and a local process are an offline view of the scenes downloaded here, nothing more.
-- No LangChain and no LangGraph. A later answer, if the page is right, has to work in plain Python over the STAC fields and the note before any framework wraps it.
+- The report uses LangChain to order tools and write the lead when a key is set, and a belt lead when it is not. The page does not ask a question.
 - No defense customer and no live track match. The scene is ICEYE open data.
 - GIS employment is not represented here. The note is a personal reading of one open scene.
-- The container placeholder is not a measurement of the 25 de Abril collect. The page says so until it is cleared or a real download replaces it.
+- Change and stack stay locked because the open catalog has no second look on this bridge. The drawn placeholder is used only when `demo/lisbon` is missing, and the page says those pictures were not measured from a raster.
 
 ## Tests
 
