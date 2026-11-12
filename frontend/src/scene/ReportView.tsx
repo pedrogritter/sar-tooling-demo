@@ -68,11 +68,10 @@ export function ReportView({ sceneId, onClose }: ReportViewProps) {
   const [partnerChoice, setPartnerChoice] = useState("")
 
   const running = job?.status === "running"
-  const keyReady = keySource === "environment" || keySource === "session"
   const askingForKey = keySource === "unset" || replacingKey
-  const startDisabled = !keyReady || replacingKey || starting || running
+  const startDisabled = replacingKey || starting || running
 
-  // The page has to know whether a key is set before Start can run.
+  // The form reads whether a key is set. Start does not wait for one.
   useEffect(() => {
     let active = true
 
@@ -557,11 +556,10 @@ function KeyForm({
       }}
     >
       <p className="text-sm leading-6 text-muted-foreground">
-        Starting a report needs an OpenAI API key. The key is how the app orders
-        the measurements, narrates each step, and writes the reading. The
-        measurements themselves stay on this machine. A key saved here stays in
-        this running server only. It is not written into the project or the
-        image. Restarting the container clears it. You can also put
+        Without a key, Start still measures and the lead is built from the
+        summary rows. A key lets the model write that lead. A key saved here
+        stays in this running server only. It is not written into the project
+        or the image. Restarting the container clears it. You can also put
         OPENAI_API_KEY in a .env file next to docker-compose.yml, or export it
         in the shell, and start the container again.
       </p>

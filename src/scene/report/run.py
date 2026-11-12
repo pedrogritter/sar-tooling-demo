@@ -1,13 +1,15 @@
 """Build the report: order the tools, run each one, then write one lead.
 
 The belt measures. A model call that fails does not stop the run: the tool
-order falls back to the belt catalog, a narrator failure becomes a plain
+order falls back to the belt catalog, each step stores a plain progress
 sentence, and a synthesis failure becomes a lead built from the summary rows.
+A single-scene lead that invents a second date or a stack is discarded too.
 """
 
 from __future__ import annotations
 
 import json
+import re
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import replace
 from pathlib import Path
@@ -237,27 +239,14 @@ def _build_section(
 
 
 def _narrate(chains: ReportModel, facts: ReportFacts, tool: IncludedTool) -> str:
-    """The model's line, or one plain sentence when the call fails or is blank."""
+    """One plain progress sentence. The model is not asked to write this line."""
 
-    try:
-        text = chains.narrate(
-            facts,
-            {
-                "id": tool.id,
-                "label": tool.label,
-                "description": tool.description,
-            },
-        )
-    except Exception:  # noqa: BLE001 - the tool still runs after a narrator failure.
-        return _plain_note(tool.label, facts.mode)
-    cleaned = " ".join(text.split())
-    if not cleaned:
-        return _plain_note(tool.label, facts.mode)
-    return cleaned[:500]
+    del chains
+    return _plain_note(tool.label, facts.mode)
 
 
 def _plain_note(label: str, mode: str) -> str:
-    """The sentence stored when the narrator does not answer."""
+    """The progress sentence for one tool. The model does not write it."""
 
     scene_mode = mode or "radar"
     return f"Measuring {label} on this {scene_mode} scene."
@@ -270,9 +259,11 @@ def _synthesize(
     sections: Sequence[ReportSection],
     glossary: str,
 ) -> tuple[str, BriefingSource]:
-    """The model's lead, or the belt compilation when the call fails or is blank.
+    """The model's lead, or the belt compilation when that reply cannot be kept.
 
-    A stack run keeps the scope sentence even when the model omits it.
+    A blank or failed call uses the belt compilation. So does a single-scene
+    reply that mentions a second date or a stack. A stack run keeps the scope
+    sentence even when the model omits it.
     """
 
     scope = STACK_SCOPE if chosen.matched_dates is not None else None
@@ -288,9 +279,22 @@ def _synthesize(
     except Exception:  # noqa: BLE001 - a failed lead keeps the belt compilation.
         return belt_lead(facts, chosen, sections), "belt"
     cleaned = text.strip()
-    if not cleaned:
+    if not cleaned or _ungrounded_lead(cleaned, chosen):
         return belt_lead(facts, chosen, sections), "belt"
     return _with_stack_scope(cleaned, chosen), "model"
+
+
+def _ungrounded_lead(text: str, chosen: ToolSet) -> bool:
+    """True when a single scene's lead invents a second date or a stack.
+
+    A partner, or a matched-date count, is the only ground for those words.
+    """
+
+    if chosen.matched_dates is not None or chosen.partner_id is not None:
+        return False
+    return (
+        re.search(r"two dates|second date|stack", text, re.IGNORECASE) is not None
+    )
 
 
 def _with_stack_scope(text: str, chosen: ToolSet) -> str:

@@ -85,7 +85,6 @@ _REPORT_ROUTE = re.compile(
     r"(?P<leaf>/run|\.pdf)?$"
 )
 _PARTNER_ID = re.compile(r"[A-Za-z0-9_-]+")
-NO_KEY_SENTENCE = "Set OPENAI_API_KEY to ask a question."
 KEY_ALREADY_SET = "An OpenAI API key is already set for this server."
 # Long enough for a project key, short enough to reject a pasted document.
 _MAX_KEY_CHARS = 512
@@ -533,7 +532,9 @@ def _run_report(
 
     The body is ``partner_id`` null, or one scene id. A partner the belt cannot
     compare is a 400. A scene with nothing unlocked does not start a job. No
-    key is a 409. A measurement that is already running is a 409.
+    key still starts the job: the run keeps the catalog order, a plain progress
+    note, and a lead built from the summary rows. A measurement that is already
+    running is a 409.
     """
 
     payload = _json_body(body)
@@ -550,10 +551,6 @@ def _run_report(
         return _plain(404, str(exc))
     if not chosen.runnable_ids:
         return _plain(400, nothing_runnable_sentence(chosen))
-    from .report.chains import model_key_source
-
-    if model_key_source() == "unset":
-        return _plain(409, NO_KEY_SENTENCE)
 
     def runner(on_step: OnStep) -> None:
         run_report(scene_id, chosen, _report_model(), on_step)

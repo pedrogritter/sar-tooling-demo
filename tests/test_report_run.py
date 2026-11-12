@@ -359,14 +359,19 @@ class RunReportTest(RunnerBase):
         self.assertEqual(
             sections["open-water"].briefing_md, "# open-water\n\nbelt text\n"
         )
-        self.assertEqual(sections["open-water"].progress_note, chains.note)
+        self.assertEqual(
+            sections["open-water"].progress_note,
+            "Measuring Open water on this stripmap scene.",
+        )
+        self.assertEqual(chains.narrate_calls, [])
         self.assertEqual(
             sections["open-water"].overview_url,
             f"/api/scenes/{SCENE}/analysis/open-water/overview.png",
         )
 
-    def test_a_narrator_failure_does_not_fail_the_tool(self) -> None:
+    def test_progress_notes_stay_plain_when_the_model_would_joke(self) -> None:
         chains = FakeChains()
+        chains.note = "The detective referee plays water polo."
         chains.note_error = RuntimeError("narrator is down")
         with self.patched():
             self.start([_included("open-water")], chains)
@@ -375,6 +380,12 @@ class RunReportTest(RunnerBase):
         self.assertEqual(
             section.progress_note, "Measuring Open water on this stripmap scene."
         )
+        self.assertEqual(chains.narrate_calls, [])
+        text = (self.root / "scenes" / SCENE / "report" / "report.json").read_text(
+            "utf-8"
+        )
+        for banned in ("detective", "referee", "water polo"):
+            self.assertNotIn(banned, text.lower())
         self.assertEqual(self.ran, [("open-water", None)])
         self.assertIn((1, section.progress_note), self.steps)
         belt_steps = [
@@ -421,7 +432,52 @@ class RunReportTest(RunnerBase):
             report = self.report()
         self.assertIsNone(chains.stack_scope)
         self.assertEqual(report.synthesis_md, "A hedged reading of the rows.")
+        self.assertEqual(report.synthesis_source, "model")
         self.assertNotIn("matched date", report.synthesis_md)
+
+    def test_a_single_scene_lead_that_names_a_stack_or_a_second_date_is_discarded(
+        self,
+    ) -> None:
+        leads = (
+            "The comparison uses two dates.",
+            "A second date is not in this collect.",
+            "This is a short stack.",
+            "STACK of returns.",
+        )
+        for lead in leads:
+            with self.subTest(lead=lead):
+                chains = FakeChains()
+                chains.lead = lead
+                with self.patched():
+                    self.start([_included("open-water")], chains)
+                    report = self.report()
+                self.assertEqual(report.synthesis_source, "belt")
+                self.assertIn("open-water row", report.synthesis_md)
+                lowered = report.synthesis_md.lower()
+                self.assertNotIn("two dates", lowered)
+                self.assertNotIn("second date", lowered)
+                self.assertNotIn("stack", lowered)
+
+    def test_a_grounded_lead_that_names_two_dates_is_kept(self) -> None:
+        cases = (
+            (PARTNER, None),
+            (None, 2),
+            (PARTNER, 2),
+        )
+        for partner_id, matched_dates in cases:
+            with self.subTest(partner_id=partner_id, matched_dates=matched_dates):
+                chains = FakeChains()
+                chains.lead = "Compared across two dates."
+                with self.patched():
+                    self.start(
+                        [_included("open-water")],
+                        chains,
+                        partner_id=partner_id,
+                        matched_dates=matched_dates,
+                    )
+                    report = self.report()
+                self.assertEqual(report.synthesis_source, "model")
+                self.assertIn("Compared across two dates.", report.synthesis_md)
 
     def test_a_locked_tool_is_a_section_and_is_not_run(self) -> None:
         reason = "This collect has no dwell stack."
@@ -447,9 +503,11 @@ class RunReportTest(RunnerBase):
             self.start([_included("open-water")], chains)
             section = self.stored()["open-water"]
         self.assertEqual(self.ran, [])
-        self.assertEqual(chains.narrate_calls, ["open-water"])
+        self.assertEqual(chains.narrate_calls, [])
         self.assertEqual(section.status, "done")
-        self.assertEqual(section.progress_note, chains.note)
+        self.assertEqual(
+            section.progress_note, "Measuring Open water on this stripmap scene."
+        )
 
     def test_amplitude_reuses_only_the_same_partner_directory(self) -> None:
         tool = _included("amplitude-change")
@@ -473,9 +531,16 @@ class RunReportTest(RunnerBase):
             sections = self.stored()
         self.assertEqual(sections["open-water"].status, "failed")
         self.assertIn("open-water could not run.", sections["open-water"].briefing_md)
-        self.assertEqual(sections["open-water"].progress_note, chains.note)
+        self.assertEqual(
+            sections["open-water"].progress_note,
+            "Measuring Open water on this stripmap scene.",
+        )
+        self.assertEqual(
+            sections["sea-roughness"].progress_note,
+            "Measuring Sea roughness on this stripmap scene.",
+        )
         self.assertEqual(sections["sea-roughness"].status, "done")
-        self.assertEqual(chains.narrate_calls, ["open-water", "sea-roughness"])
+        self.assertEqual(chains.narrate_calls, [])
 
     def test_a_running_section_is_visible_while_its_tool_runs(self) -> None:
         seen: list[str] = []
@@ -503,9 +568,12 @@ class RunReportTest(RunnerBase):
             patch("scene.report.run.report_facts", lambda scene_id: FACTS),
             patch("scene.report.run._glossary", lambda: "GLOSSARY TEXT"),
         ):
-            self.start([_included("open-water")], FakeChains())
+            chains = FakeChains()
+            chains.note = "The detective referee plays water polo."
+            self.start([_included("open-water")], chains)
         self.assertEqual(seen, ["running"])
-        self.assertEqual(notes, ["Working on the dark water."])
+        self.assertEqual(notes, ["Measuring Open water on this stripmap scene."])
+        self.assertEqual(chains.narrate_calls, [])
 
 
 class StartReportTest(unittest.TestCase):

@@ -185,12 +185,24 @@ class WebBase(unittest.TestCase):
 class RunRouteTest(WebBase):
     PATH = f"/api/scenes/{SCENE}/report/run"
 
-    def test_409_without_a_key_and_no_job_starts(self) -> None:
+    def test_202_without_a_key_starts_a_job(self) -> None:
         with self.patched(chains=None):
             response = self.post(self.PATH, {"partner_id": None})
-        self.assertEqual(response.status, 409)
-        self.assertIn(NO_KEY, response.body.decode())
-        self.assertEqual(self.manager.current().status, "idle")
+            self.assertEqual(response.status, 202)
+            payload = json.loads(response.body)
+            self.assertEqual(payload["status"], "running")
+            self.assertTrue(payload["job_id"])
+            self.assertNotIn(NO_KEY, response.body.decode())
+            self.wait()
+            document = json.loads(self.get(f"/api/scenes/{SCENE}/report").body)
+        self.assertEqual(self.manager.current().status, "done")
+        self.assertEqual(document["synthesis_source"], "belt")
+        notes = [item["progress_note"] for item in document["sections"]]
+        self.assertIn("Measuring Open water on this stripmap scene.", notes)
+        saved = " ".join(notes).lower()
+        for banned in ("detective", "referee", "water polo"):
+            self.assertNotIn(banned, saved)
+        self.assertNotIn("two dates", document["synthesis_md"].lower())
 
     def test_400_for_a_missing_or_malformed_partner(self) -> None:
         with self.patched(chains=FakeChains()):
