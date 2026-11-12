@@ -11,7 +11,9 @@ from unittest.mock import patch
 from scene.belt.catalog import tools_for_scene
 from scene.demo import (
     PlaceholderMissing,
+    SeedRasterError,
     clear_placeholder,
+    note_from_folder,
     seed_if_needed,
     write_seed,
 )
@@ -166,6 +168,106 @@ class DemoSeedTest(unittest.TestCase):
             with patch("scene.demo.data_dir", lambda: data):
                 missing = dispatch("POST", "/api/demo/clear", b"", state)
             self.assertEqual(missing.status, 404)
+
+    def test_missing_lisbon_tree_still_draws_the_placeholder(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            root = Path(raw)
+            dest = root / "seed"
+            write_seed(dest, root / "absent")
+            folder = dest / "scenes" / LISBON_SCENE_ID
+            self.assertTrue((folder / "demo.json").is_file())
+            self.assertTrue((folder / "qlk-cog.tif").is_file())
+            self.assertFalse((folder / "preview.png").exists())
+            self.assertIsNotNone(note_from_folder(folder))
+
+    def test_committed_lisbon_seed_copies_preview_without_a_raster(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            root = Path(raw)
+            source = root / "lisbon"
+            scene = source / "scenes" / LISBON_SCENE_ID
+            scene.mkdir(parents=True)
+            (scene / "stac.json").write_text(
+                json.dumps(_collect(LISBON_SCENE_ID)), encoding="utf-8"
+            )
+            (scene / "preview.png").write_bytes(b"preview-bytes")
+            (scene / "graphic.png").write_bytes(b"graphic-bytes")
+            (scene / "vid-mp4.mp4").write_bytes(b"video-bytes")
+            (scene / "demo.json").write_text(
+                '{"placeholder": true}\n', encoding="utf-8"
+            )
+            dest = root / "seed"
+            write_seed(dest, source)
+            copied = dest / "scenes" / LISBON_SCENE_ID
+            self.assertEqual((copied / "preview.png").read_bytes(), b"preview-bytes")
+            self.assertEqual((copied / "graphic.png").read_bytes(), b"graphic-bytes")
+            self.assertEqual((copied / "vid-mp4.mp4").read_bytes(), b"video-bytes")
+            self.assertFalse((copied / "demo.json").exists())
+            self.assertIsNone(note_from_folder(copied))
+            self.assertFalse(any(path.suffix == ".tif" for path in copied.rglob("*")))
+            listed = list_library(dest)
+            self.assertEqual(
+                listed[0]["quicklook_url"],
+                f"/api/scenes/{LISBON_SCENE_ID}/quicklook.png",
+            )
+
+    def test_committed_seed_rejects_a_radar_raster(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            root = Path(raw)
+            source = root / "lisbon"
+            scene = source / "scenes" / LISBON_SCENE_ID
+            scene.mkdir(parents=True)
+            (scene / "stac.json").write_text("{}\n", encoding="utf-8")
+            (scene / "preview.png").write_bytes(b"preview")
+            (scene / "qlk-cog.tif").write_bytes(b"not-a-real-raster")
+            dest = root / "seed"
+            with self.assertRaises(SeedRasterError) as caught:
+                write_seed(dest, source)
+            self.assertIn("qlk-cog.tif", str(caught.exception))
+            self.assertFalse(dest.exists())
+
+    def test_preview_png_alone_is_a_quicklook_url(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            root = Path(raw)
+            folder = root / "scenes" / LISBON_SCENE_ID
+            folder.mkdir(parents=True)
+            (folder / "stac.json").write_text(
+                json.dumps(_collect(LISBON_SCENE_ID)), encoding="utf-8"
+            )
+            (folder / "preview.png").write_bytes(b"preview-bytes")
+            listed = list_library(root)
+            self.assertEqual(
+                listed[0]["quicklook_url"],
+                f"/api/scenes/{LISBON_SCENE_ID}/quicklook.png",
+            )
+            self.assertIsNone(listed[0]["thumbnail_url"])
+            self.assertFalse(listed[0]["placeholder"])
+
+
+def _collect(scene_id: str) -> dict[str, object]:
+    """A few dozen bytes of metadata. Not a downloaded scene."""
+
+    return {
+        "id": scene_id,
+        "bbox": [-9.214, 38.66, -9.14, 38.718],
+        "properties": {
+            "datetime": "2025-10-24T13:53:16.995Z",
+            "start_datetime": "2025-10-24T13:53:09.803Z",
+            "end_datetime": "2025-10-24T13:53:24.188Z",
+            "platform": "ICEYE-X52",
+            "sar:instrument_mode": "spotlight",
+            "sar:frequency_band": "X",
+            "sar:polarizations": ["VV"],
+            "sat:orbit_state": "descending",
+            "view:incidence_angle": 32.0,
+        },
+        "assets": {
+            "graphic": {
+                "href": "https://example.invalid/graphic.png",
+                "type": "image/png",
+                "title": "Thumbnail",
+            }
+        },
+    }
 
 
 if __name__ == "__main__":

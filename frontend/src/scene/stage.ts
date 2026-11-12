@@ -17,7 +17,7 @@ export interface StageView {
   alt: string
   label: string
   emptyMessage: string
-  /** Quicklook, thumbnail, and dwell video. Hidden while an analysis picture is up. */
+  /** Quicklook, thumbnail, and video. Hidden while an analysis picture is up. */
   showSources: boolean
 }
 
@@ -67,8 +67,8 @@ export function stageFor(
       loading: false,
       media: "video",
       src: scene.video_url,
-      alt: `Dwell video of ${scene.scene_id}`,
-      label: previewCaption("Dwell video", scene),
+      alt: `Video of ${scene.scene_id}`,
+      label: previewCaption("Video", scene),
       emptyMessage: "",
       showSources: true,
     }

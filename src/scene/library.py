@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from .demo import note_from_folder
+from .demo import note_from_folder, preview_file
 from .loader import Asset, SceneDataError, SceneRecord, load_scene
 from .paths import LISBON_SCENE_ID, data_dir, valid_scene_id
 
@@ -47,7 +47,12 @@ def _entry(scene: SceneRecord, folder: Path) -> dict[str, object]:
     graphic = scene.asset("graphic")
     quicklook = scene.asset("qlk-cog")
     video = scene.asset("vid-mp4")
-    has_quicklook = _on_disk(quicklook) or _on_disk(graphic)
+    # preview.png is the committed quicklook. It counts when no COG was stored.
+    has_quicklook = (
+        _on_disk(quicklook)
+        or preview_file(folder) is not None
+        or _on_disk(graphic)
+    )
     return {
         "scene_id": scene_id,
         "collected_at": scene.collected_at,

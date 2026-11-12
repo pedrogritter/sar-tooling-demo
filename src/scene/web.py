@@ -31,7 +31,12 @@ from .catalog import (
     is_large_asset,
     record_public,
 )
-from .demo import PlaceholderMissing, clear_placeholder, note_from_folder
+from .demo import (
+    PlaceholderMissing,
+    clear_placeholder,
+    note_from_folder,
+    preview_file,
+)
 from .downloads import (
     DownloadAlreadyRunningError,
     DownloadError,
@@ -92,6 +97,9 @@ _MAX_KEY_CHARS = 512
 # The only text a client reads when the PDF writer fails.
 REPORT_PDF_FAILED = "The report PDF could not be written."
 _QUICKLOOK_CACHE: dict[str, tuple[int, bytes]] = {}
+# One closed range, or one open range that runs through the last byte.
+_CLOSED_BYTE_RANGE = re.compile(r"bytes=(\d+)-(\d+)\Z")
+_OPEN_BYTE_RANGE = re.compile(r"bytes=(\d+)-\Z")
 
 
 @dataclass(frozen=True)
@@ -110,6 +118,7 @@ class HttpResponse:
     content_type: str
     body: bytes
     cache_control: str = "no-store"
+    headers: tuple[tuple[str, str], ...] = ()
 
 
 def build_state(
@@ -144,12 +153,15 @@ def dispatch(
     job_manager: MeasurementJobManager | None = None,
     catalog: CatalogService | None = None,
     downloads: DownloadManager | None = None,
+    range_header: str | None = None,
 ) -> HttpResponse:
     """Answer one request. Unknown paths and methods get a short error."""
 
     manager = job_manager or default_manager()
     path = urlsplit(target).path
-    extra = _dispatch_workspace(method, target, body, manager, catalog, downloads)
+    extra = _dispatch_workspace(
+        method, target, body, manager, catalog, downloads, range_header
+    )
     if extra is not None:
         return extra
     if method == "GET" and path == "/":
@@ -340,6 +352,7 @@ def _dispatch_workspace(
     manager: MeasurementJobManager,
     catalog: CatalogService | None,
     downloads: DownloadManager | None,
+    range_header: str | None = None,
 ) -> HttpResponse | None:
     """Catalog, library, scene, and download routes. None lets the old routes run."""
 
@@ -391,7 +404,10 @@ def _dispatch_workspace(
     scene_match = _SCENE_ROUTE.fullmatch(path)
     if scene_match is not None and method == "GET":
         return _scene_route(
-            scene_match.group("scene_id"), scene_match.group("leaf"), manager
+            scene_match.group("scene_id"),
+            scene_match.group("leaf"),
+            manager,
+            range_header,
         )
     return None
 
@@ -750,16 +766,43 @@ def _catalog_item(
 
 
 def _scene_route(
-    scene_id: str, leaf: str | None, manager: MeasurementJobManager
+    scene_id: str,
+    leaf: str | None,
+    manager: MeasurementJobManager,
+    range_header: str | None = None,
 ) -> HttpResponse:
     if not valid_scene_id(scene_id):
         return _plain(404, "Not found")
     if leaf == "quicklook.png":
+        # A present qlk-cog.tif still renders. Otherwise preview.png is
+        # returned unchanged, which is the committed quicklook.
+        scene = _read_local_scene(scene_id)
+        if isinstance(scene, HttpResponse):
+            return scene
+        cog = scene.asset("qlk-cog")
+        if cog is None or not cog.on_disk:
+            preview = preview_file(scene_dir(scene_id))
+            if preview is not None and _inside_scene(scene_id, preview):
+                return _file_response(preview, "image/png")
         return _scene_quicklook(scene_id)
     if leaf == "thumbnail":
         return _scene_file(scene_id, "graphic")
     if leaf == "video":
-        return _scene_file(scene_id, "vid-mp4")
+        # vid-mp4 only. The dwell stack (vid-cog.tif) is a measurement, not
+        # the file this control plays, and it is not range-served.
+        scene = _read_local_scene(scene_id)
+        if isinstance(scene, HttpResponse):
+            return scene
+        video = scene.asset("vid-mp4")
+        if (
+            video is None
+            or video.local_path is None
+            or not _inside_scene(scene_id, video.local_path)
+        ):
+            return _plain(404, "Not found")
+        return _file_response(
+            video.local_path, "video/mp4", range_header=range_header
+        )
     return _scene_json(scene_id, manager)
 
 
@@ -965,13 +1008,75 @@ def _safe_dist_path(dist_dir: Path, request_path: str) -> Path | None:
 
 
 def _file_response(
-    path: Path, content_type: str, cache_control: str = "no-store"
+    path: Path,
+    content_type: str,
+    cache_control: str = "no-store",
+    range_header: str | None = None,
 ) -> HttpResponse:
+    """Read one allowlisted file. Only an mp4 advertises byte ranges."""
+
     try:
         body = path.read_bytes()
     except OSError:
         return _plain(404, "Not found")
-    return HttpResponse(200, content_type, body, cache_control)
+    if content_type != "video/mp4":
+        return HttpResponse(200, content_type, body, cache_control)
+    return _mp4_response(body, cache_control, range_header)
+
+
+def _mp4_response(
+    body: bytes, cache_control: str, range_header: str | None
+) -> HttpResponse:
+    """206 for one ``bytes=start-end`` range. A start past the end is 416.
+
+    A missing or unsatisfiable range is the whole file with status 200.
+    An open ``bytes=start-`` range runs through the last byte so the player
+    can seek. ``vid-cog.tif`` never reaches this function.
+    """
+
+    accept = (("Accept-Ranges", "bytes"),)
+    parsed = _byte_range(range_header, len(body))
+    if parsed is None:
+        return HttpResponse(200, "video/mp4", body, cache_control, accept)
+    if parsed[0] < 0:
+        headers = accept + (("Content-Range", f"bytes */{len(body)}"),)
+        return HttpResponse(416, "video/mp4", b"", cache_control, headers)
+    start, end = parsed
+    headers = accept + (("Content-Range", f"bytes {start}-{end}/{len(body)}"),)
+    return HttpResponse(
+        206, "video/mp4", body[start : end + 1], cache_control, headers
+    )
+
+
+def _byte_range(header: str | None, size: int) -> tuple[int, int] | None:
+    """Inclusive slice, ``(-1, -1)`` when the start is past the end, else None.
+
+    None means the header is missing or not a single satisfiable range, and
+    the caller returns the whole file.
+    """
+
+    if header is None:
+        return None
+    text = header.strip()
+    if not text:
+        return None
+    closed = _CLOSED_BYTE_RANGE.fullmatch(text)
+    if closed is not None:
+        start = int(closed.group(1))
+        end = int(closed.group(2))
+        if start > end:
+            return None
+    else:
+        opened = _OPEN_BYTE_RANGE.fullmatch(text)
+        if opened is None:
+            return None
+        start = int(opened.group(1))
+        end = size - 1
+    if start >= size:
+        return (-1, -1)
+    if end >= size:
+        end = size - 1
+    return start, end
 
 
 def _content_type(path: Path) -> str:
@@ -1012,17 +1117,33 @@ def make_handler(
         """Stdlib request handler closed over the loaded scene."""
 
         def do_GET(self) -> None:
-            self._reply(dispatch("GET", self.path, b"", state, manager))
+            self._reply(
+                dispatch(
+                    "GET",
+                    self.path,
+                    b"",
+                    state,
+                    manager,
+                    range_header=self._range_header(),
+                )
+            )
 
         def do_HEAD(self) -> None:
             # Same status and headers as GET. The body stays on the server.
-            response = dispatch("GET", self.path, b"", state, manager)
-            self.send_response(response.status)
-            self.send_header("Content-Type", response.content_type)
-            self.send_header("Content-Length", str(len(response.body)))
-            self.send_header("Cache-Control", response.cache_control)
-            self.send_header("X-Content-Type-Options", "nosniff")
-            self.end_headers()
+            response = dispatch(
+                "GET",
+                self.path,
+                b"",
+                state,
+                manager,
+                range_header=self._range_header(),
+            )
+            self._send_head(response)
+
+        def _range_header(self) -> str | None:
+            # One Range header, as sent by the player. Anything else is ignored.
+            raw = self.headers.get("Range")
+            return raw if isinstance(raw, str) else None
 
         def do_POST(self) -> None:
             length = self._content_length(self.path)
@@ -1054,13 +1175,18 @@ def make_handler(
                 return None
             return length
 
-        def _reply(self, response: HttpResponse) -> None:
+        def _send_head(self, response: HttpResponse) -> None:
             self.send_response(response.status)
             self.send_header("Content-Type", response.content_type)
             self.send_header("Content-Length", str(len(response.body)))
             self.send_header("Cache-Control", response.cache_control)
+            for name, value in response.headers:
+                self.send_header(name, value)
             self.send_header("X-Content-Type-Options", "nosniff")
             self.end_headers()
+
+        def _reply(self, response: HttpResponse) -> None:
+            self._send_head(response)
             self.wfile.write(response.body)
 
         def log_message(self, fmt: str, *args: object) -> None:
