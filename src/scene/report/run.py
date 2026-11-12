@@ -1,191 +1,342 @@
-"""Build the report: run each chosen tool once, then phrase that tool alone."""
+"""Build the report: order the tools, run each one, then write one lead.
+
+The belt measures. A model call that fails does not stop the run: the tool
+order falls back to the belt catalog, a narrator failure becomes a plain
+sentence, and a synthesis failure becomes a lead built from the summary rows.
+"""
 
 from __future__ import annotations
 
 import json
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Mapping, Sequence
+from dataclasses import replace
 from pathlib import Path
 from typing import Literal, Protocol
 
 from scene.belt import run as belt_run
-from scene.belt.catalog import analysis_dir, tool_spec
+from scene.belt.catalog import analysis_dir
+from scene.paths import project_root
 from scene.report.facts import ReportFacts, report_facts
-from scene.report.schema import ReportPlan
+from scene.report.select import (
+    AMPLITUDE_TOOL,
+    STACK_SCOPE,
+    IncludedTool,
+    ToolSet,
+)
 from scene.report.store import BriefingSource, Report, ReportSection, ReportStore
 
 OnStep = Callable[[int, str], None]
 
-# The one tool that needs a second scene. The report only waits for it.
-AMPLITUDE_TOOL = "amplitude-change"
-WAITING_BRIEFING = "The comparison has not been made."
 LOCKED_FALLBACK = "The belt keeps this tool locked for this scene."
 
 
-class Phraser(Protocol):
+class ReportModel(Protocol):
     """The part of ``ReportChains`` the run needs. Tests give it a fake."""
 
-    def phrase(
-        self, question: str, facts: ReportFacts, measurement: Mapping[str, object]
+    def order(
+        self, facts: ReportFacts, tools: Sequence[Mapping[str, str]]
+    ) -> list[str]: ...
+
+    def narrate(self, facts: ReportFacts, tool: Mapping[str, str]) -> str: ...
+
+    def synthesize(
+        self,
+        facts: ReportFacts,
+        partner_id: str | None,
+        sections: Sequence[ReportSection],
+        glossary: str,
+        *,
+        stack_scope: str | None,
+        matched_dates: int | None,
     ) -> str: ...
+
+
+class FallbackModel:
+    """Every call fails. The run keeps the catalog, a plain note, and the belt lead."""
+
+    def order(
+        self, facts: ReportFacts, tools: Sequence[Mapping[str, str]]
+    ) -> list[str]:
+        raise RuntimeError("No model is configured.")
+
+    def narrate(self, facts: ReportFacts, tool: Mapping[str, str]) -> str:
+        raise RuntimeError("No model is configured.")
+
+    def synthesize(
+        self,
+        facts: ReportFacts,
+        partner_id: str | None,
+        sections: Sequence[ReportSection],
+        glossary: str,
+        *,
+        stack_scope: str | None,
+        matched_dates: int | None,
+    ) -> str:
+        raise RuntimeError("No model is configured.")
 
 
 def run_report(
     scene_id: str,
-    question: str,
-    plan: ReportPlan,
-    chains: Phraser,
+    chosen: ToolSet,
+    chains: ReportModel,
     on_step: OnStep,
 ) -> None:
-    """Write the report for ``plan``, saving after every section.
+    """Write the report for ``chosen``, saving at each phase the page polls.
 
-    Locked and waiting sections go first, so the page has something to show.
-    Each selected tool then runs only when its ``measurements.json`` is missing,
-    and is phrased from its own measurement alone. A tool that fails becomes a
-    ``failed`` section with the reason, and the next tool still runs.
+    The file is written while the order is being chosen, again when that order
+    is known, after every section, while the lead is written, and after it.
+    A tool that raises becomes a failed section and the next tool still runs.
     """
 
+    facts = report_facts(scene_id)
+    glossary = _glossary()
     store = ReportStore(scene_id)
-    report = store.new(question, _fixed_sections(plan))
+    report = Report(
+        scene_id=scene_id,
+        question="",
+        partner_id=chosen.partner_id,
+        phase="planning",
+        tool_order=[],
+        synthesis_md="",
+        synthesis_source="belt",
+        sections=[],
+    )
     store.save(report)
-    facts = report_facts(scene_id)
-    for tool_id in plan.selected:
-        report = _build_section(
-            scene_id, question, tool_id, None, facts, chains, on_step, store, report
-        )
-
-
-def run_amplitude(
-    scene_id: str,
-    partner_id: str,
-    chains: Phraser,
-    on_step: OnStep,
-) -> None:
-    """Run amplitude change against ``partner_id`` and replace only that section.
-
-    The other sections and their phrasing are left exactly as saved.
-    """
-
-    store = ReportStore(scene_id)
-    report = store.load()
-    if report is None:
-        raise RuntimeError(
-            "There is no report for this scene to add the comparison to."
-        )
-    facts = report_facts(scene_id)
-    _build_section(
-        scene_id,
-        report.question,
-        AMPLITUDE_TOOL,
-        partner_id,
-        facts,
-        chains,
-        on_step,
-        store,
+    report = replace(
         report,
-        always_run=True,
+        phase="running",
+        tool_order=_ordered(chains, facts, chosen),
+        sections=_locked_sections(chosen),
+    )
+    store.save(report)
+    by_id = {tool.id: tool for tool in chosen.tools}
+    for tool_id in report.tool_order:
+        report = _build_section(
+            scene_id,
+            by_id[tool_id],
+            chosen.partner_id,
+            facts,
+            chains,
+            on_step,
+            store,
+            report,
+        )
+    report = replace(report, phase="writing")
+    store.save(report)
+    text, source = _synthesize(chains, facts, chosen, report.sections, glossary)
+    store.save(
+        replace(report, phase="done", synthesis_md=text, synthesis_source=source)
     )
 
 
-def _fixed_sections(plan: ReportPlan) -> list[ReportSection]:
-    """Locked tools, then amplitude change when it waits. No tool has run."""
+def belt_lead(
+    facts: ReportFacts, chosen: ToolSet, sections: Sequence[ReportSection]
+) -> str:
+    """A lead made only from the rows, the limits, the failures, and the locks.
 
-    sections = [
-        ReportSection(
-            tool_id=locked.id,
-            status="locked",
-            measurement=None,
-            briefing_md=locked.reason or LOCKED_FALLBACK,
-            briefing_source="belt",
-            overview_url=None,
-            partner_id=None,
+    Nothing here is inferred. A stack run also states that every matched date
+    was compared, and how many dates that was.
+    """
+
+    labels = {tool.id: tool.label for tool in chosen.tools}
+    parts: list[str] = []
+    if chosen.partner_id:
+        parts.append(f"Partner scene: {chosen.partner_id}.")
+    if chosen.matched_dates is not None:
+        parts.append(
+            f"{STACK_SCOPE} This comparison uses {chosen.matched_dates} matched dates."
         )
-        for locked in plan.locked
+    for section in sections:
+        label = labels.get(section.tool_id, section.tool_id)
+        if section.status == "locked":
+            parts.append(f"{label} is locked. {section.briefing_md}".strip())
+            continue
+        if section.status == "failed":
+            parts.append(f"{label} failed. {section.briefing_md}".strip())
+            continue
+        if section.status != "done" or section.measurement is None:
+            continue
+        summary = section.measurement.get("summary")
+        if isinstance(summary, list):
+            for row in summary:
+                if isinstance(row, dict):
+                    parts.append(
+                        f"{label}: {row.get('label', '')}: {row.get('value', '')}."
+                    )
+        limit = section.measurement.get("limit")
+        if isinstance(limit, str) and limit:
+            parts.append(limit)
+    if not parts:
+        mode = facts.mode or "this"
+        parts.append(f"No measurement was stored for this {mode} scene.")
+    return "\n\n".join(parts)
+
+
+def _ordered(chains: ReportModel, facts: ReportFacts, chosen: ToolSet) -> list[str]:
+    """The model's permutation, or the belt catalog order when the reply is unusable."""
+
+    runnable = [tool for tool in chosen.tools if not tool.locked]
+    expected = [tool.id for tool in runnable]
+    payload = [
+        {"id": tool.id, "label": tool.label, "description": tool.description}
+        for tool in runnable
     ]
-    if AMPLITUDE_TOOL in plan.waiting:
-        sections.append(
-            ReportSection(
-                tool_id=AMPLITUDE_TOOL,
-                status="waiting",
-                measurement=None,
-                briefing_md=WAITING_BRIEFING,
-                briefing_source="belt",
-                overview_url=None,
-                partner_id=None,
-            )
-        )
-    return sections
+    try:
+        proposed = chains.order(facts, payload)
+    except Exception:  # noqa: BLE001 - a failed order call keeps the catalog order.
+        return expected
+    if _permutation(proposed, expected):
+        return proposed
+    return expected
+
+
+def _permutation(proposed: Sequence[str], expected: Sequence[str]) -> bool:
+    """True when ``proposed`` is exactly the ids in ``expected``, in any order."""
+
+    return len(proposed) == len(expected) and set(proposed) == set(expected)
 
 
 def _build_section(
     scene_id: str,
-    question: str,
-    tool_id: str,
+    tool: IncludedTool,
     partner_id: str | None,
     facts: ReportFacts,
-    chains: Phraser,
+    chains: ReportModel,
     on_step: OnStep,
     store: ReportStore,
     report: Report,
-    always_run: bool = False,
 ) -> Report:
-    """Run one tool if needed, phrase it, and save the report with its section."""
+    """Narrate, measure or reuse, and save. A tool error is only this section."""
 
-    report = _save(store, report, _unfinished(tool_id, "running", partner_id))
-    folder = analysis_dir(scene_id, tool_id, partner_id)
+    partner = partner_id if tool.id == AMPLITUDE_TOOL else None
+    note = _narrate(chains, facts, tool)
+    report = _save(store, report, _unfinished(tool.id, "running", partner, note))
+    # The poll reads this sentence while the raster runs. Belt steps do not replace it.
+    on_step(1, note)
+
+    folder = analysis_dir(scene_id, tool.id, partner)
     try:
-        if always_run or not (folder / "measurements.json").is_file():
-            belt_run.run_tool(scene_id, tool_id, on_step, partner_id)
-        else:
-            on_step(
-                1,
-                f"{tool_spec(tool_id).label}: the measurement is already on disk.",
-            )
+        if not (folder / "measurements.json").is_file():
+            belt_run.run_tool(scene_id, tool.id, _hold(note, on_step), partner)
         measurement = _read_measurement(folder)
         belt_text = (folder / "briefing.md").read_text(encoding="utf-8")
     except Exception as exc:  # noqa: BLE001 - a tool failure becomes its section.
-        failed = _unfinished(tool_id, "failed", partner_id, _reason(exc))
+        failed = _unfinished(tool.id, "failed", partner, note, _reason(exc))
         return _save(store, report, failed)
-    text, source = _phrase(chains, question, facts, measurement, belt_text)
     section = ReportSection(
-        tool_id=tool_id,
+        tool_id=tool.id,
         status="done",
         measurement=measurement,
-        briefing_md=text,
-        briefing_source=source,
-        overview_url=_overview_url(scene_id, tool_id, partner_id, folder),
-        partner_id=partner_id,
+        briefing_md=belt_text,
+        briefing_source="belt",
+        overview_url=_overview_url(scene_id, tool.id, partner, folder),
+        partner_id=partner,
+        progress_note=note,
     )
     return _save(store, report, section)
 
 
-def _phrase(
-    chains: Phraser,
-    question: str,
-    facts: ReportFacts,
-    measurement: dict[str, object],
-    belt_text: str,
-) -> tuple[str, BriefingSource]:
-    """The model's text when it keeps the limit unchanged. Else the belt's.
+def _narrate(chains: ReportModel, facts: ReportFacts, tool: IncludedTool) -> str:
+    """The model's line, or one plain sentence when the call fails or is blank."""
 
-    A chain error or a phrase that drops the limit string is not an error for
-    the report: the belt's own briefing.md says the same thing and keeps the
-    limit, so it is stored instead.
+    try:
+        text = chains.narrate(
+            facts,
+            {
+                "id": tool.id,
+                "label": tool.label,
+                "description": tool.description,
+            },
+        )
+    except Exception:  # noqa: BLE001 - the tool still runs after a narrator failure.
+        return _plain_note(tool.label, facts.mode)
+    cleaned = " ".join(text.split())
+    if not cleaned:
+        return _plain_note(tool.label, facts.mode)
+    return cleaned[:500]
+
+
+def _plain_note(label: str, mode: str) -> str:
+    """The sentence stored when the narrator does not answer."""
+
+    scene_mode = mode or "radar"
+    return f"Measuring {label} on this {scene_mode} scene."
+
+
+def _synthesize(
+    chains: ReportModel,
+    facts: ReportFacts,
+    chosen: ToolSet,
+    sections: Sequence[ReportSection],
+    glossary: str,
+) -> tuple[str, BriefingSource]:
+    """The model's lead, or the belt compilation when the call fails or is blank.
+
+    A stack run keeps the scope sentence even when the model omits it.
     """
 
-    limit = measurement.get("limit")
+    scope = STACK_SCOPE if chosen.matched_dates is not None else None
     try:
-        text = chains.phrase(question, facts, measurement)
-    except Exception:  # noqa: BLE001 - any chain failure keeps the belt briefing.
-        return belt_text, "belt"
-    if isinstance(limit, str) and limit and limit in text:
-        return text, "model"
-    return belt_text, "belt"
+        text = chains.synthesize(
+            facts,
+            chosen.partner_id,
+            sections,
+            glossary,
+            stack_scope=scope,
+            matched_dates=chosen.matched_dates,
+        )
+    except Exception:  # noqa: BLE001 - a failed lead keeps the belt compilation.
+        return belt_lead(facts, chosen, sections), "belt"
+    cleaned = text.strip()
+    if not cleaned:
+        return belt_lead(facts, chosen, sections), "belt"
+    return _with_stack_scope(cleaned, chosen), "model"
+
+
+def _with_stack_scope(text: str, chosen: ToolSet) -> str:
+    """Append the stack sentence when this run compared every matched date."""
+
+    if chosen.matched_dates is None or STACK_SCOPE in text:
+        return text
+    extra = (
+        f"{STACK_SCOPE} This comparison uses {chosen.matched_dates} matched dates."
+    )
+    return f"{text.rstrip()}\n\n{extra}"
+
+
+def _locked_sections(chosen: ToolSet) -> list[ReportSection]:
+    """Locked tools in this set, with the belt's sentence. They are not run."""
+
+    return [
+        ReportSection(
+            tool_id=tool.id,
+            status="locked",
+            measurement=None,
+            briefing_md=tool.reason or LOCKED_FALLBACK,
+            briefing_source="belt",
+            overview_url=None,
+            partner_id=None,
+            progress_note="",
+        )
+        for tool in chosen.tools
+        if tool.locked
+    ]
+
+
+def _hold(note: str, on_step: OnStep) -> OnStep:
+    """A step callback that keeps the narrator line as the job sentence."""
+
+    def forward(_index: int, _sentence: str) -> None:
+        on_step(1, note)
+
+    return forward
 
 
 def _unfinished(
     tool_id: str,
     status: Literal["running", "failed"],
     partner_id: str | None,
+    progress_note: str,
     briefing_md: str = "",
 ) -> ReportSection:
     """A section with no measurement yet: ``running`` or ``failed``."""
@@ -198,6 +349,7 @@ def _unfinished(
         briefing_source="belt",
         overview_url=None,
         partner_id=partner_id,
+        progress_note=progress_note,
     )
 
 
@@ -229,6 +381,16 @@ def _overview_url(
     if partner_id:
         return f"{base}/{partner_id}/overview.png"
     return f"{base}/overview.png"
+
+
+def _glossary() -> str:
+    """The only extra text synthesis may use. A missing file yields nothing."""
+
+    path = project_root() / "content" / "sar_glossary.md"
+    try:
+        return path.read_text(encoding="utf-8")
+    except OSError:
+        return ""
 
 
 def _reason(exc: Exception) -> str:

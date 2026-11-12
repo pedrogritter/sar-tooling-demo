@@ -1,4 +1,4 @@
-"""Store and run: the report is written section by section, one tool at a time."""
+"""Store and run: order, each section, and the lead are written as they land."""
 
 from __future__ import annotations
 
@@ -6,49 +6,116 @@ import json
 import tempfile
 import threading
 import unittest
-from collections.abc import Callable, Iterator, Mapping
+from collections.abc import Callable, Iterator, Mapping, Sequence
 from contextlib import contextmanager
 from pathlib import Path
-from typing import Any
 from unittest.mock import patch
 
-from scene.belt.catalog import analysis_dir
+from scene.belt.catalog import analysis_dir, tool_spec
 from scene.jobs import JobAlreadyRunningError, MeasurementJobManager
-from scene.report.run import run_amplitude, run_report
-from scene.report.schema import LockedTool, ReportPlan
-from scene.report.store import ReportSection, ReportStore
+from scene.report.facts import ReportFacts
+from scene.report.run import run_report
+from scene.report.select import STACK_SCOPE, IncludedTool, ToolSet
+from scene.report.store import Report, ReportSection, ReportStore
 from tests import test_belt
 
 SCENE = "ICEYE_A_20260211T000000Z_1_X1_SM"
 PARTNER = "ICEYE_B_20260212T000000Z_1_X1_SM"
-QUESTION = "What is on the water?"
+OTHER = "ICEYE_C_20260213T000000Z_1_X1_SM"
 
 WATER_LIMIT = "Shadow, tarmac, and sand are dark for the same reason."
 ROUGH_LIMIT = "This split is roughness, not a wave height."
 CHANGE_LIMIT = "The picture is a shared stretch."
-FACTS = object()
+FACTS = ReportFacts(
+    scene_id=SCENE,
+    mode="stripmap",
+    incidence=26.0,
+    orbit="ascending",
+    look="right",
+    band="X",
+    polarization="VV",
+    collected_at="2026-02-11T00:00:00Z",
+    overview_metres=None,
+    tools=[],
+    catalogue_only=[],
+)
 
 Steps = list[tuple[int, str]]
 
 
 class FakeChains:
-    """A stand-in for ReportChains. It records every phrase call."""
+    """A stand-in for ReportChains. Order echoes the ids unless told otherwise."""
 
-    def __init__(self, reply: Callable[[Mapping[str, object]], str]) -> None:
-        self._reply = reply
-        self.calls: list[tuple[str, object, Mapping[str, object]]] = []
+    def __init__(self) -> None:
+        self.order_result: list[str] | None = None
+        self.order_error: BaseException | None = None
+        self.note = "Working on the dark water."
+        self.note_error: BaseException | None = None
+        self.lead = "A hedged reading of the rows."
+        self.lead_error: BaseException | None = None
+        self.order_calls: list[list[str]] = []
+        self.narrate_calls: list[str] = []
+        self.glossary = ""
+        self.stack_scope: str | None = None
+        self.phase_during_order: str | None = None
 
-    def phrase(
-        self, question: str, facts: object, measurement: Mapping[str, object]
+    def order(
+        self, facts: ReportFacts, tools: Sequence[Mapping[str, str]]
+    ) -> list[str]:
+        stored = ReportStore(SCENE).load()
+        self.phase_during_order = None if stored is None else stored.phase
+        ids = [str(tool["id"]) for tool in tools]
+        self.order_calls.append(ids)
+        if self.order_error is not None:
+            raise self.order_error
+        if self.order_result is None:
+            return list(ids)
+        return list(self.order_result)
+
+    def narrate(self, facts: ReportFacts, tool: Mapping[str, str]) -> str:
+        self.narrate_calls.append(str(tool["id"]))
+        if self.note_error is not None:
+            raise self.note_error
+        return self.note
+
+    def synthesize(
+        self,
+        facts: ReportFacts,
+        partner_id: str | None,
+        sections: Sequence[ReportSection],
+        glossary: str,
+        *,
+        stack_scope: str | None,
+        matched_dates: int | None,
     ) -> str:
-        self.calls.append((question, facts, measurement))
-        return self._reply(measurement)
+        del facts, partner_id, sections, matched_dates
+        self.glossary = glossary
+        self.stack_scope = stack_scope
+        if self.lead_error is not None:
+            raise self.lead_error
+        return self.lead
 
 
-def _echo_limit(measurement: Mapping[str, object]) -> str:
-    """Model prose that keeps the limit string unchanged."""
+def _included(
+    tool_id: str, *, locked: bool = False, reason: str = ""
+) -> IncludedTool:
+    spec = tool_spec(tool_id)
+    return IncludedTool(
+        id=spec.id,
+        label=spec.label,
+        description=spec.description,
+        kind=spec.kind,
+        locked=locked,
+        reason=reason,
+    )
 
-    return f"In plain words. {measurement['limit']}"
+
+def _set(
+    tools: list[IncludedTool],
+    partner_id: str | None = None,
+    matched_dates: int | None = None,
+) -> ToolSet:
+    return ToolSet(partner_id, tuple(tools), matched_dates)
 
 
 class RunnerBase(unittest.TestCase):
@@ -64,8 +131,10 @@ class RunnerBase(unittest.TestCase):
             "open-water": WATER_LIMIT,
             "sea-roughness": ROUGH_LIMIT,
             "amplitude-change": CHANGE_LIMIT,
+            "water-persistence": "Two dates are a pair, not a seasonal record.",
         }
         self.sections_seen_by_run_tool: list[list[str]] = []
+        self.orders_seen: list[list[str]] = []
         self.failing: set[str] = set()
 
     @contextmanager
@@ -76,6 +145,7 @@ class RunnerBase(unittest.TestCase):
             patch("scene.report.store.scene_dir", rooted),
             patch("scene.belt.run.run_tool", self.run_tool),
             patch("scene.report.run.report_facts", lambda scene_id: FACTS),
+            patch("scene.report.run._glossary", lambda: "GLOSSARY TEXT"),
         ):
             yield
 
@@ -114,24 +184,21 @@ class RunnerBase(unittest.TestCase):
         self.sections_seen_by_run_tool.append(
             [] if stored is None else [item.tool_id for item in stored.sections]
         )
+        self.orders_seen.append([] if stored is None else list(stored.tool_order))
         if tool_id in self.failing:
             raise RuntimeError(f"{tool_id} could not run.")
         on_step(1, f"belt step for {tool_id}")
         self.write_measurement(tool_id, partner_id)
 
-    def plan(self, **changes: Any) -> ReportPlan:
-        base: dict[str, Any] = {
-            "selected": ["open-water", "sea-roughness"],
-            "waiting": [],
-            "locked": [],
-        }
-        base.update(changes)
-        return ReportPlan(**base)
-
     def stored(self) -> dict[str, ReportSection]:
         report = ReportStore(SCENE).load()
         assert report is not None
         return {item.tool_id: item for item in report.sections}
+
+    def report(self) -> Report:
+        loaded = ReportStore(SCENE).load()
+        assert loaded is not None
+        return loaded
 
 
 class StoreTest(RunnerBase):
@@ -139,7 +206,7 @@ class StoreTest(RunnerBase):
         with self.patched():
             self.assertIsNone(ReportStore(SCENE).load())
 
-    def test_save_then_load_round_trips_at_the_report_path(self) -> None:
+    def test_save_then_load_round_trips_the_new_fields(self) -> None:
         section = ReportSection(
             tool_id="open-water",
             status="done",
@@ -148,19 +215,39 @@ class StoreTest(RunnerBase):
             briefing_source="model",
             overview_url="/api/scenes/a/analysis/open-water/overview.png",
             partner_id=None,
+            progress_note="Measuring open water.",
+        )
+        report = Report(
+            scene_id=SCENE,
+            question="",
+            partner_id=PARTNER,
+            phase="running",
+            tool_order=["open-water"],
+            synthesis_md="A hedged reading.",
+            synthesis_source="model",
+            sections=[section],
         )
         with self.patched():
-            store = ReportStore(SCENE)
-            store.save(store.new(QUESTION, [section]))
-            loaded = store.load()
-        assert loaded is not None
-        self.assertEqual(loaded.question, QUESTION)
-        self.assertEqual(loaded.sections, [section])
+            ReportStore(SCENE).save(report)
+            loaded = ReportStore(SCENE).load()
+        self.assertEqual(loaded, report)
         path = self.root / "scenes" / SCENE / "report" / "report.json"
-        self.assertTrue(path.is_file())
-        keys = set(json.loads(path.read_text("utf-8"))["sections"][0])
+        payload = json.loads(path.read_text("utf-8"))
         self.assertEqual(
-            keys,
+            set(payload),
+            {
+                "scene_id",
+                "question",
+                "partner_id",
+                "phase",
+                "tool_order",
+                "synthesis_md",
+                "synthesis_source",
+                "sections",
+            },
+        )
+        self.assertEqual(
+            set(payload["sections"][0]),
             {
                 "tool_id",
                 "status",
@@ -169,140 +256,230 @@ class StoreTest(RunnerBase):
                 "briefing_source",
                 "overview_url",
                 "partner_id",
+                "progress_note",
             },
         )
 
+    def test_an_older_file_still_loads_and_waiting_is_still_accepted(self) -> None:
+        path = self.root / "scenes" / SCENE / "report" / "report.json"
+        path.parent.mkdir(parents=True)
+        path.write_text(
+            json.dumps(
+                {
+                    "scene_id": SCENE,
+                    "question": "What is on the water?",
+                    "sections": [
+                        {
+                            "tool_id": "amplitude-change",
+                            "status": "waiting",
+                            "measurement": None,
+                            "briefing_md": "The comparison has not been made.",
+                            "briefing_source": "belt",
+                            "overview_url": None,
+                            "partner_id": None,
+                        }
+                    ],
+                }
+            ),
+            encoding="utf-8",
+        )
+        with self.patched():
+            loaded = ReportStore(SCENE).load()
+        assert loaded is not None
+        self.assertEqual(loaded.question, "What is on the water?")
+        self.assertIsNone(loaded.partner_id)
+        self.assertEqual(loaded.phase, "done")
+        self.assertEqual(loaded.tool_order, [])
+        self.assertEqual(loaded.synthesis_md, "")
+        self.assertEqual(loaded.synthesis_source, "belt")
+        self.assertEqual(loaded.sections[0].status, "waiting")
+        self.assertEqual(loaded.sections[0].progress_note, "")
+
 
 class RunReportTest(RunnerBase):
-    def run_report(self, plan: ReportPlan, chains: FakeChains) -> None:
-        run_report(SCENE, QUESTION, plan, chains, self.on_step)
+    def start(
+        self,
+        tools: list[IncludedTool],
+        chains: FakeChains,
+        partner_id: str | None = None,
+        matched_dates: int | None = None,
+    ) -> None:
+        run_report(SCENE, _set(tools, partner_id, matched_dates), chains, self.on_step)
 
-    def test_locked_and_waiting_sections_are_written_before_any_tool_runs(
+    def test_a_bad_order_falls_back_to_catalog_order_and_the_run_continues(
         self,
     ) -> None:
-        plan = self.plan(
-            selected=["open-water"],
-            waiting=["amplitude-change"],
-            locked=[LockedTool("dwell-motion", "This collect has no dwell stack.")],
-        )
-        chains = FakeChains(_echo_limit)
+        tools = [_included("open-water"), _included("sea-roughness")]
+        chains = FakeChains()
+        chains.order_result = ["sea-roughness"]
         with self.patched():
-            self.run_report(plan, chains)
-            sections = self.stored()
-        # The fixed sections are on disk first, then the running tool's own.
+            self.start(tools, chains)
+            report = self.report()
+        self.assertEqual(chains.order_calls, [["open-water", "sea-roughness"]])
+        self.assertEqual(report.tool_order, ["open-water", "sea-roughness"])
         self.assertEqual(
-            self.sections_seen_by_run_tool[0],
-            ["dwell-motion", "amplitude-change", "open-water"],
+            self.ran, [("open-water", None), ("sea-roughness", None)]
         )
-        locked = sections["dwell-motion"]
-        self.assertEqual(locked.status, "locked")
-        self.assertEqual(locked.briefing_md, "This collect has no dwell stack.")
-        self.assertEqual(locked.briefing_source, "belt")
-        self.assertIsNone(locked.overview_url)
-        self.assertIsNone(locked.measurement)
-        waiting = sections["amplitude-change"]
-        self.assertEqual(waiting.status, "waiting")
-        self.assertIsNone(waiting.partner_id)
-        self.assertEqual(waiting.briefing_md, "The comparison has not been made.")
-        self.assertNotIn(("amplitude-change", None), self.ran)
-        self.assertEqual(self.ran, [("open-water", None)])
+        self.assertEqual(report.phase, "done")
+        self.assertEqual(report.question, "")
+        self.assertNotIn("waiting", {item.status for item in report.sections})
 
-    def test_the_tools_run_in_plan_order_and_each_is_phrased_alone(self) -> None:
-        chains = FakeChains(_echo_limit)
+    def test_a_failed_order_call_uses_catalog_order(self) -> None:
+        chains = FakeChains()
+        chains.order_error = RuntimeError("model is down")
         with self.patched():
-            self.run_report(self.plan(), chains)
-            sections = self.stored()
-        self.assertEqual(self.ran, [("open-water", None), ("sea-roughness", None)])
-        self.assertEqual(len(chains.calls), 2)
-        for (question, facts, measurement), tool_id in zip(
-            chains.calls, ["open-water", "sea-roughness"], strict=True
-        ):
-            self.assertEqual(question, QUESTION)
-            self.assertIs(facts, FACTS)
-            self.assertEqual(measurement["tool_id"], tool_id)
-            self.assertEqual(
-                [row["label"] for row in measurement["summary"]],  # type: ignore[attr-defined]
-                [f"{tool_id} row"],
-            )
-        self.assertEqual(list(sections), ["open-water", "sea-roughness"])
-        done = sections["open-water"]
-        self.assertEqual(done.status, "done")
-        self.assertEqual(done.briefing_source, "model")
-        self.assertIn(WATER_LIMIT, done.briefing_md)
+            self.start([_included("open-water"), _included("sea-roughness")], chains)
+            report = self.report()
+        self.assertEqual(report.tool_order, ["open-water", "sea-roughness"])
+        self.assertEqual(self.ran[0], ("open-water", None))
+
+    def test_a_real_permutation_is_kept(self) -> None:
+        chains = FakeChains()
+        chains.order_result = ["sea-roughness", "open-water"]
+        with self.patched():
+            self.start([_included("open-water"), _included("sea-roughness")], chains)
         self.assertEqual(
-            done.overview_url,
+            self.ran, [("sea-roughness", None), ("open-water", None)]
+        )
+
+    def test_the_order_is_on_disk_before_a_tool_runs_and_each_section_is_saved(
+        self,
+    ) -> None:
+        chains = FakeChains()
+        with self.patched():
+            self.start([_included("open-water"), _included("sea-roughness")], chains)
+            sections = self.stored()
+        self.assertEqual(chains.phase_during_order, "planning")
+        self.assertEqual(self.orders_seen[0], ["open-water", "sea-roughness"])
+        self.assertEqual(
+            self.sections_seen_by_run_tool[0], ["open-water"]
+        )
+        self.assertEqual(sections["open-water"].status, "done")
+        self.assertEqual(sections["open-water"].briefing_source, "belt")
+        self.assertEqual(
+            sections["open-water"].briefing_md, "# open-water\n\nbelt text\n"
+        )
+        self.assertEqual(sections["open-water"].progress_note, chains.note)
+        self.assertEqual(
+            sections["open-water"].overview_url,
             f"/api/scenes/{SCENE}/analysis/open-water/overview.png",
         )
 
-    def test_the_second_phrase_call_does_not_see_the_first_tools_summary(self) -> None:
-        chains = FakeChains(_echo_limit)
+    def test_a_narrator_failure_does_not_fail_the_tool(self) -> None:
+        chains = FakeChains()
+        chains.note_error = RuntimeError("narrator is down")
         with self.patched():
-            self.run_report(self.plan(), chains)
-        first = json.dumps(chains.calls[0][2])
-        second = json.dumps(chains.calls[1][2])
-        self.assertNotIn("sea-roughness", first)
-        self.assertNotIn("open-water", second)
+            self.start([_included("open-water")], chains)
+            section = self.stored()["open-water"]
+        self.assertEqual(section.status, "done")
+        self.assertEqual(
+            section.progress_note, "Measuring Open water on this stripmap scene."
+        )
+        self.assertEqual(self.ran, [("open-water", None)])
+        self.assertIn((1, section.progress_note), self.steps)
+        belt_steps = [
+            sentence for _index, sentence in self.steps if "belt step" in sentence
+        ]
+        self.assertEqual(belt_steps, [])
+
+    def test_a_synthesis_failure_stores_the_belt_compilation(self) -> None:
+        chains = FakeChains()
+        chains.lead_error = RuntimeError("synthesis is down")
+        with self.patched():
+            self.start([_included("open-water")], chains)
+            report = self.report()
+        self.assertEqual(report.synthesis_source, "belt")
+        self.assertIn("open-water row", report.synthesis_md)
+        self.assertIn("ok", report.synthesis_md)
+        self.assertIn(WATER_LIMIT, report.synthesis_md)
+        self.assertEqual(report.phase, "done")
+
+    def test_a_stack_run_keeps_the_scope_sentence_when_the_model_omits_it(self) -> None:
+        chains = FakeChains()
+        chains.lead = "A hedged reading."
+        tools = [
+            _included("open-water"),
+            _included("amplitude-change"),
+            _included("water-persistence"),
+        ]
+        with self.patched():
+            self.start(tools, chains, partner_id=PARTNER, matched_dates=2)
+            report = self.report()
+        self.assertEqual(report.synthesis_source, "model")
+        self.assertIn("A hedged reading.", report.synthesis_md)
+        self.assertIn(STACK_SCOPE, report.synthesis_md)
+        self.assertIn("2 matched dates", report.synthesis_md)
+        self.assertEqual(chains.stack_scope, STACK_SCOPE)
+        self.assertEqual(report.partner_id, PARTNER)
+        self.assertIn(("amplitude-change", PARTNER), self.ran)
+        self.assertIn(("water-persistence", None), self.ran)
+
+    def test_no_partner_does_not_add_the_stack_sentence(self) -> None:
+        chains = FakeChains()
+        with self.patched():
+            self.start([_included("open-water")], chains)
+            report = self.report()
+        self.assertIsNone(chains.stack_scope)
+        self.assertEqual(report.synthesis_md, "A hedged reading of the rows.")
+        self.assertNotIn("matched date", report.synthesis_md)
+
+    def test_a_locked_tool_is_a_section_and_is_not_run(self) -> None:
+        reason = "This collect has no dwell stack."
+        chains = FakeChains()
+        with self.patched():
+            self.start(
+                [
+                    _included("dwell-motion", locked=True, reason=reason),
+                    _included("open-water"),
+                ],
+                chains,
+            )
+            sections = self.stored()
+        self.assertEqual(sections["dwell-motion"].status, "locked")
+        self.assertEqual(sections["dwell-motion"].briefing_md, reason)
+        self.assertEqual(self.ran, [("open-water", None)])
+        self.assertNotIn("dwell-motion", chains.narrate_calls)
 
     def test_an_existing_measurement_is_not_run_again(self) -> None:
-        chains = FakeChains(_echo_limit)
+        chains = FakeChains()
         with self.patched():
             self.write_measurement("open-water")
-            self.run_report(self.plan(selected=["open-water"]), chains)
-            sections = self.stored()
+            self.start([_included("open-water")], chains)
+            section = self.stored()["open-water"]
         self.assertEqual(self.ran, [])
-        self.assertEqual(len(chains.calls), 1)
-        self.assertEqual(sections["open-water"].status, "done")
-        self.assertEqual(len(self.steps), 1)
-        sentence = self.steps[0][1]
-        self.assertIn("Open water", sentence)
-        self.assertIn("already on disk", sentence)
-
-    def test_a_tool_that_runs_passes_the_belt_step_callback_through(self) -> None:
-        with self.patched():
-            self.run_report(self.plan(selected=["open-water"]), FakeChains(_echo_limit))
-        self.assertEqual(self.steps, [(1, "belt step for open-water")])
-
-    def test_text_without_the_limit_string_stores_the_belt_briefing(self) -> None:
-        chains = FakeChains(lambda _measurement: "A tidy paragraph with no limit.")
-        with self.patched():
-            self.run_report(self.plan(selected=["open-water"]), chains)
-            section = self.stored()["open-water"]
-        self.assertEqual(section.briefing_source, "belt")
+        self.assertEqual(chains.narrate_calls, ["open-water"])
         self.assertEqual(section.status, "done")
-        self.assertEqual(section.briefing_md, "# open-water\n\nbelt text\n")
+        self.assertEqual(section.progress_note, chains.note)
 
-    def test_a_limit_string_that_was_reworded_stores_the_belt_briefing(self) -> None:
-        chains = FakeChains(lambda _measurement: WATER_LIMIT.lower())
+    def test_amplitude_reuses_only_the_same_partner_directory(self) -> None:
+        tool = _included("amplitude-change")
+        chains = FakeChains()
         with self.patched():
-            self.run_report(self.plan(selected=["open-water"]), chains)
-            section = self.stored()["open-water"]
-        self.assertEqual(section.briefing_source, "belt")
-
-    def test_a_chain_error_keeps_the_belt_briefing(self) -> None:
-        def boom(_measurement: Mapping[str, object]) -> str:
-            raise RuntimeError("model is down")
-
-        with self.patched():
-            self.run_report(self.plan(selected=["open-water"]), FakeChains(boom))
-            section = self.stored()["open-water"]
-        self.assertEqual(section.briefing_source, "belt")
-        self.assertEqual(section.status, "done")
-        self.assertEqual(section.briefing_md, "# open-water\n\nbelt text\n")
+            self.write_measurement("amplitude-change", partner_id=None)
+            self.start([tool], chains, partner_id=PARTNER)
+            self.assertEqual(self.ran, [("amplitude-change", PARTNER)])
+            self.ran.clear()
+            self.write_measurement("amplitude-change", partner_id=PARTNER)
+            self.start([tool], chains, partner_id=PARTNER)
+            self.assertEqual(self.ran, [])
+            self.start([tool], chains, partner_id=OTHER)
+            self.assertEqual(self.ran, [("amplitude-change", OTHER)])
 
     def test_a_tool_that_fails_is_marked_failed_and_the_rest_still_run(self) -> None:
         self.failing = {"open-water"}
-        chains = FakeChains(_echo_limit)
+        chains = FakeChains()
         with self.patched():
-            self.run_report(self.plan(), chains)
+            self.start([_included("open-water"), _included("sea-roughness")], chains)
             sections = self.stored()
         self.assertEqual(sections["open-water"].status, "failed")
         self.assertIn("open-water could not run.", sections["open-water"].briefing_md)
-        self.assertEqual(sections["open-water"].briefing_source, "belt")
+        self.assertEqual(sections["open-water"].progress_note, chains.note)
         self.assertEqual(sections["sea-roughness"].status, "done")
-        self.assertEqual(len(chains.calls), 1)
+        self.assertEqual(chains.narrate_calls, ["open-water", "sea-roughness"])
 
     def test_a_running_section_is_visible_while_its_tool_runs(self) -> None:
         seen: list[str] = []
+        notes: list[str] = []
         original = self.run_tool
 
         def watching(
@@ -313,9 +490,9 @@ class RunReportTest(RunnerBase):
         ) -> None:
             report = ReportStore(scene_id).load()
             assert report is not None
-            seen.extend(
-                item.status for item in report.sections if item.tool_id == tool_id
-            )
+            match = [item for item in report.sections if item.tool_id == tool_id]
+            seen.extend(item.status for item in match)
+            notes.extend(item.progress_note for item in match)
             original(scene_id, tool_id, on_step, partner_id)
 
         rooted = test_belt._rooted(self.root)
@@ -324,72 +501,11 @@ class RunReportTest(RunnerBase):
             patch("scene.report.store.scene_dir", rooted),
             patch("scene.belt.run.run_tool", watching),
             patch("scene.report.run.report_facts", lambda scene_id: FACTS),
+            patch("scene.report.run._glossary", lambda: "GLOSSARY TEXT"),
         ):
-            self.run_report(self.plan(selected=["open-water"]), FakeChains(_echo_limit))
+            self.start([_included("open-water")], FakeChains())
         self.assertEqual(seen, ["running"])
-
-
-class RunAmplitudeTest(RunnerBase):
-    def test_only_amplitude_change_runs_and_only_its_section_is_replaced(
-        self,
-    ) -> None:
-        plan = self.plan(
-            selected=["open-water"],
-            waiting=["amplitude-change"],
-            locked=[LockedTool("dwell-motion", "No dwell stack.")],
-        )
-        first = FakeChains(_echo_limit)
-        second = FakeChains(_echo_limit)
-        with self.patched():
-            run_report(SCENE, QUESTION, plan, first, self.on_step)
-            before = self.stored()
-            self.ran.clear()
-            self.steps.clear()
-            run_amplitude(SCENE, PARTNER, second, self.on_step)
-            after = self.stored()
-        self.assertEqual(self.ran, [("amplitude-change", PARTNER)])
-        self.assertEqual(self.steps, [(1, "belt step for amplitude-change")])
-        self.assertEqual(len(second.calls), 1)
-        measurement = second.calls[0][2]
-        self.assertEqual(measurement["tool_id"], "amplitude-change")
-        self.assertNotIn("open-water", json.dumps(measurement))
-        self.assertEqual(after["open-water"], before["open-water"])
-        self.assertEqual(after["dwell-motion"], before["dwell-motion"])
-        change = after["amplitude-change"]
-        self.assertEqual(change.status, "done")
-        self.assertEqual(change.partner_id, PARTNER)
-        self.assertEqual(change.briefing_source, "model")
-        self.assertIn(CHANGE_LIMIT, change.briefing_md)
-        self.assertEqual(
-            change.overview_url,
-            f"/api/scenes/{SCENE}/analysis/amplitude-change/{PARTNER}/overview.png",
-        )
-        self.assertEqual(list(after), list(before))
-
-    def test_a_missing_limit_string_keeps_the_belt_briefing(self) -> None:
-        plan = self.plan(selected=[], waiting=["amplitude-change"])
-        with self.patched():
-            run_report(SCENE, QUESTION, plan, FakeChains(_echo_limit), self.on_step)
-            run_amplitude(
-                SCENE, PARTNER, FakeChains(lambda _m: "No limit here."), self.on_step
-            )
-            change = self.stored()["amplitude-change"]
-        self.assertEqual(change.briefing_source, "belt")
-        self.assertEqual(change.status, "done")
-        self.assertEqual(change.briefing_md, "# amplitude-change\n\nbelt text\n")
-
-    def test_it_adds_the_section_when_the_report_had_none(self) -> None:
-        with self.patched():
-            run_report(
-                SCENE,
-                QUESTION,
-                self.plan(selected=["open-water"]),
-                FakeChains(_echo_limit),
-                self.on_step,
-            )
-            run_amplitude(SCENE, PARTNER, FakeChains(_echo_limit), self.on_step)
-            sections = self.stored()
-        self.assertEqual(list(sections), ["open-water", "amplitude-change"])
+        self.assertEqual(notes, ["Working on the dark water."])
 
 
 class StartReportTest(unittest.TestCase):

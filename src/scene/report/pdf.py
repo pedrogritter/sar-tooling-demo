@@ -2,27 +2,19 @@
 
 This module reads only the stored report and the belt's ``overview.png`` files.
 It never imports a chat model, so building a PDF needs no key and no network.
+``write_pdf`` is the only function that loads WeasyPrint, and the route calls
+the model nowhere on this path. The narrator line is not part of the document.
 """
 
 from __future__ import annotations
 
-import re
-import unicodedata
+import html
+import importlib
 from pathlib import Path
-
-from fpdf import FPDF
-from fpdf.enums import XPos, YPos
 
 from scene.belt.catalog import analysis_dir, tool_spec
 from scene.paths import valid_scene_id
 from scene.report.store import Report, ReportSection
-
-_FONT = "Helvetica"
-_MARGIN_MM = 15
-_LINE_MM = 5.5
-_PICTURE_WIDTH_MM = 150
-# A token this long cannot wrap inside a page, so it is split with a space.
-_LONGEST_WORD = 70
 
 _STATUS_TEXT = {
     "done": "Measured",
@@ -32,75 +24,157 @@ _STATUS_TEXT = {
     "failed": "Could not run",
 }
 
-# Typographic marks the built-in font cannot draw, and plain stand-ins.
-_STAND_INS = {
-    "\u2013": "-",
-    "\u2014": "-",
-    "\u2212": "-",
-    "\u2018": "'",
-    "\u2019": "'",
-    "\u201c": '"',
-    "\u201d": '"',
-    "\u2026": "...",
-    "\u2192": "->",
-    "\u00a0": " ",
-    "\u03c3": "sigma",
-}
-_MARKDOWN_MARKS = re.compile(r"(\*\*|__|`)")
-_HEADING_MARKS = re.compile(r"^\s{0,3}#{1,6}\s*", re.MULTILINE)
-
 
 def build_pdf(report: Report) -> bytes:
-    """The whole report as PDF bytes: title, question, then every section.
+    """The whole report as PDF bytes. The model is not called."""
 
-    Locked and waiting sections are included, each with its own sentence.
+    return write_pdf(render_html(report))
+
+
+def render_html(report: Report) -> str:
+    """One HTML document: lead, then each tool on its own page.
+
+    CSS lives in the document. Page headers and page numbers are ``@page``
+    rules, which a style attribute cannot carry. Local ``overview.png`` paths
+    are file URIs so WeasyPrint can read them without a network fetch.
     """
 
-    pdf = FPDF(format="A4")
-    pdf.set_margins(_MARGIN_MM, _MARGIN_MM, _MARGIN_MM)
-    pdf.set_auto_page_break(True, margin=_MARGIN_MM)
-    pdf.set_title(_plain(f"Scene report {report.scene_id}"))
-    pdf.add_page()
-    _heading(pdf, "Scene report", 18)
-    _paragraph(pdf, f"Scene: {report.scene_id}")
-    _paragraph(pdf, f"Question: {report.question}")
+    scene_id = html.escape(report.scene_id)
+    header_id = report.scene_id if valid_scene_id(report.scene_id) else ""
+    parts = [
+        "<!DOCTYPE html>",
+        '<html lang="en">',
+        "<head>",
+        '<meta charset="utf-8">',
+        f"<title>Scene report {scene_id}</title>",
+        "<style>",
+        _css(header_id),
+        "</style>",
+        "</head>",
+        "<body>",
+        "<h1>Scene report</h1>",
+        f"<p>Scene: {scene_id}</p>",
+    ]
+    if report.question.strip():
+        parts.append(f"<p>Question: {html.escape(report.question)}</p>")
+    if report.partner_id:
+        parts.append(f"<p>Partner scene: {html.escape(report.partner_id)}</p>")
+    parts.append('<section class="synthesis">')
+    parts.append("<h2>Reading</h2>")
+    parts.append(_blocks(report.synthesis_md or "This report has no reading yet."))
+    parts.append("</section>")
     if not report.sections:
-        _paragraph(pdf, "This report has no sections yet.")
-    for section in report.sections:
-        _section(pdf, report.scene_id, section)
-    return bytes(pdf.output())
+        parts.append("<p>This report has no sections yet.</p>")
+    for section in _document_sections(report):
+        parts.append(_section(report.scene_id, section))
+    parts.append("</body></html>")
+    return "\n".join(parts)
 
 
-def _section(pdf: FPDF, scene_id: str, section: ReportSection) -> None:
-    pdf.ln(3)
-    _heading(pdf, _label(section.tool_id), 14)
-    _paragraph(pdf, _STATUS_TEXT[section.status], style="I")
+def write_pdf(html_document: str) -> bytes:
+    """Turn one HTML document into PDF bytes.
+
+    WeasyPrint is imported here so importing this module, and tests that mock
+    this function, do not need the Pango libraries.
+    """
+
+    module = importlib.import_module("weasyprint")
+    document = getattr(module, "HTML")(string=html_document)
+    payload = document.write_pdf()
+    if not isinstance(payload, bytes | bytearray):
+        raise RuntimeError("The report PDF could not be written.")
+    return bytes(payload)
+
+
+def _section(scene_id: str, section: ReportSection) -> str:
+    """One tool. The progress note is the live joke, so it is left out."""
+
+    label = html.escape(_label(section.tool_id))
+    parts = [
+        '<section class="tool">',
+        f"<h2>{label}</h2>",
+        f'<p class="status">{html.escape(_STATUS_TEXT[section.status])}</p>',
+    ]
     if section.partner_id:
-        _paragraph(pdf, f"Compared with: {section.partner_id}")
-    text = _plain(_HEADING_MARKS.sub("", section.briefing_md))
-    for block in text.split("\n"):
-        if block.strip():
-            _paragraph(pdf, block)
-    _measurement(pdf, section.measurement)
+        parts.append(f"<p>Compared with: {html.escape(section.partner_id)}</p>")
+    if section.status == "done":
+        parts.append(_summary(section.measurement))
+    elif section.briefing_md.strip():
+        parts.append(_blocks(section.briefing_md))
     picture = _picture(scene_id, section)
-    if picture is not None:
-        pdf.ln(2)
-        pdf.image(str(picture), w=_PICTURE_WIDTH_MM)
+    if picture is not None and section.status == "done":
+        src = html.escape(picture.resolve().as_uri(), quote=True)
+        parts.append(f'<img src="{src}" alt="{label}">')
+    parts.append("</section>")
+    return "\n".join(parts)
 
 
-def _measurement(pdf: FPDF, measurement: dict[str, object] | None) -> None:
+def _summary(measurement: dict[str, object] | None) -> str:
     """The belt's labelled values, then its limit sentence."""
 
     if measurement is None:
-        return
+        return ""
+    parts: list[str] = []
     summary = measurement.get("summary")
     if isinstance(summary, list):
+        items: list[str] = []
         for row in summary:
             if isinstance(row, dict):
-                _paragraph(pdf, f"- {row.get('label', '')}: {row.get('value', '')}")
+                item_label = html.escape(str(row.get("label", "")))
+                value = html.escape(str(row.get("value", "")))
+                items.append(f"<li>{item_label}: {value}</li>")
+        if items:
+            parts.append("<ul>" + "".join(items) + "</ul>")
     limit = measurement.get("limit")
     if isinstance(limit, str) and limit:
-        _paragraph(pdf, f"Limit: {limit}")
+        parts.append(f'<p class="limit">Limit: {html.escape(limit)}</p>')
+    return "\n".join(parts)
+
+
+def _document_sections(report: Report) -> list[ReportSection]:
+    """Done tools in run order, then locked, waiting, failed, and still running.
+
+    An older file has no ``tool_order``. Its sections stay in the saved order
+    inside each status.
+    """
+
+    buckets: dict[str, list[ReportSection]] = {
+        "done": [],
+        "locked": [],
+        "waiting": [],
+        "failed": [],
+        "running": [],
+    }
+    if report.tool_order:
+        by_id = {section.tool_id: section for section in report.sections}
+        seen: set[str] = set()
+        ordered = [_take(by_id, tool_id, seen) for tool_id in report.tool_order]
+        for section in [item for item in ordered if item is not None]:
+            buckets.setdefault(section.status, []).append(section)
+        leftovers = [
+            section for section in report.sections if section.tool_id not in seen
+        ]
+    else:
+        leftovers = list(report.sections)
+    for section in leftovers:
+        buckets.setdefault(section.status, []).append(section)
+    return [
+        *buckets["done"],
+        *buckets["locked"],
+        *buckets["waiting"],
+        *buckets["failed"],
+        *buckets["running"],
+    ]
+
+
+def _take(
+    by_id: dict[str, ReportSection], tool_id: str, seen: set[str]
+) -> ReportSection | None:
+    section = by_id.get(tool_id)
+    if section is None or tool_id in seen:
+        return None
+    seen.add(tool_id)
+    return section
 
 
 def _picture(scene_id: str, section: ReportSection) -> Path | None:
@@ -117,46 +191,74 @@ def _label(tool_id: str) -> str:
     """The belt's tool label, or the id for a tool the belt no longer lists."""
 
     try:
-        return _plain(tool_spec(tool_id).label)
+        return tool_spec(tool_id).label
     except KeyError:
-        return _plain(tool_id)
+        return tool_id
 
 
-def _heading(pdf: FPDF, text: str, size: int) -> None:
-    pdf.set_font(_FONT, "B", size)
-    pdf.multi_cell(0, _LINE_MM + 2, _plain(text), new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+def _blocks(text: str) -> str:
+    """Escape text and keep each non-empty line as its own paragraph."""
+
+    lines = [line.strip() for line in text.splitlines() if line.strip()]
+    if not lines:
+        return ""
+    return "\n".join(f"<p>{html.escape(line)}</p>" for line in lines)
 
 
-def _paragraph(pdf: FPDF, text: str, style: str = "") -> None:
-    pdf.set_font(_FONT, style, 11)
-    pdf.multi_cell(0, _LINE_MM, _plain(text), new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+def _css(scene_id: str) -> str:
+    """A4, a running header, page numbers, and a break before every tool."""
 
-
-def _plain(text: str) -> str:
-    """Text the built-in Latin-1 font can draw.
-
-    Markdown marks are dropped, typographic marks get plain stand-ins, accents
-    fold to their base letter when Latin-1 lacks them, and anything left over
-    becomes ``?``. Very long tokens are split so they can wrap.
-    """
-
-    cleaned = _MARKDOWN_MARKS.sub("", text)
-    for mark, stand_in in _STAND_INS.items():
-        cleaned = cleaned.replace(mark, stand_in)
-    kept: list[str] = []
-    for char in cleaned:
-        if ord(char) < 256:
-            kept.append(char)
-            continue
-        base = unicodedata.normalize("NFKD", char).encode("latin-1", "ignore")
-        kept.append(base.decode("latin-1") or "?")
-    return " ".join(_split_long(token) for token in "".join(kept).split(" "))
-
-
-def _split_long(token: str) -> str:
-    if len(token) <= _LONGEST_WORD:
-        return token
-    return " ".join(
-        token[start : start + _LONGEST_WORD]
-        for start in range(0, len(token), _LONGEST_WORD)
-    )
+    header = html.escape(scene_id, quote=True)
+    return f"""
+@page {{
+  size: A4;
+  margin: 18mm 16mm 20mm 16mm;
+  @top-left {{
+    content: "Scene report";
+    font-family: "Liberation Sans", sans-serif;
+    font-size: 9pt;
+    color: #444;
+  }}
+  @top-right {{
+    content: "{header}";
+    font-family: "Liberation Sans", sans-serif;
+    font-size: 9pt;
+    color: #444;
+  }}
+  @bottom-right {{
+    content: counter(page) " / " counter(pages);
+    font-family: "Liberation Sans", sans-serif;
+    font-size: 9pt;
+    color: #444;
+  }}
+}}
+body {{
+  font-family: "Liberation Sans", sans-serif;
+  font-size: 11pt;
+  line-height: 1.45;
+  color: #1a1a1a;
+}}
+h1 {{
+  font-size: 18pt;
+  margin: 0 0 8pt;
+}}
+h2 {{
+  font-size: 14pt;
+  margin: 0 0 6pt;
+}}
+p {{
+  margin: 0 0 6pt;
+}}
+.status {{
+  font-style: italic;
+}}
+.tool {{
+  break-before: page;
+  page-break-before: always;
+}}
+img {{
+  width: 150mm;
+  height: auto;
+  margin-top: 8pt;
+}}
+"""

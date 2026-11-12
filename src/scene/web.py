@@ -13,7 +13,7 @@ import logging
 import math
 import mimetypes
 import re
-from collections.abc import Callable, Mapping
+from collections.abc import Callable
 from dataclasses import asdict, dataclass
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -56,11 +56,10 @@ from .paths import (
     static_dir,
     valid_scene_id,
 )
-from .report.facts import ReportFacts, report_facts
 from .report.pdf import build_pdf
-from .report.run import Phraser, run_amplitude, run_report
-from .report.store import ReportStore
-from .report.validate import validate_plan
+from .report.run import FallbackModel, ReportModel, run_report
+from .report.select import IneligiblePartner, choose_tools, nothing_runnable_sentence
+from .report.store import Report, ReportStore
 
 if TYPE_CHECKING:
     from .quicklook import QuicklookImage
@@ -83,18 +82,15 @@ _ANALYSIS_ROUTE = re.compile(
 _TOOLS_ROUTE = re.compile(r"^/api/scenes/(?P<scene_id>[A-Za-z0-9_-]+)/tools$")
 _REPORT_ROUTE = re.compile(
     r"^/api/scenes/(?P<scene_id>[A-Za-z0-9_-]+)/report"
-    r"(?P<leaf>/plan|/run|/amplitude|\.pdf)?$"
+    r"(?P<leaf>/run|\.pdf)?$"
 )
 _PARTNER_ID = re.compile(r"[A-Za-z0-9_-]+")
-# The longest question a report accepts, in UTF-8 bytes.
-_MAX_QUESTION_BYTES = 2048
 NO_KEY_SENTENCE = "Set OPENAI_API_KEY to ask a question."
-# The only text a client reads when the model or the PDF writer fails.
-REPORT_PLAN_FAILED = "The report plan could not be written."
+KEY_ALREADY_SET = "An OpenAI API key is already set for this server."
+# Long enough for a project key, short enough to reject a pasted document.
+_MAX_KEY_CHARS = 512
+# The only text a client reads when the PDF writer fails.
 REPORT_PDF_FAILED = "The report PDF could not be written."
-
-# The one tool that needs a second scene, so the report only waits for it.
-_AMPLITUDE_TOOL = "amplitude-change"
 _QUICKLOOK_CACHE: dict[str, tuple[int, bytes]] = {}
 
 
@@ -379,6 +375,8 @@ def _dispatch_workspace(
             item.group("leaf"),
             _catalog(catalog),
         )
+    if path == "/api/report/key" and method in {"GET", "POST"}:
+        return _report_key(method, body)
     report_match = _REPORT_ROUTE.fullmatch(path)
     if report_match is not None:
         reply = _report_route(
@@ -398,26 +396,19 @@ def _dispatch_workspace(
     return None
 
 
-class _BeltOnlyPhraser:
-    """Used when no key is set: every phrase fails, so the belt's text is kept."""
-
-    def phrase(
-        self, question: str, facts: ReportFacts, measurement: Mapping[str, object]
-    ) -> str:
-        raise RuntimeError(NO_KEY_SENTENCE)
-
-
-def _report_phraser() -> Phraser:
-    """The model chains when a key is set, else the belt-text fallback.
+def _report_model() -> ReportModel:
+    """The model chains when a key is set, else a model whose calls all fail.
 
     The chains module is imported here, not at the top, so serving the page,
-    the stored report, and the PDF never load a chat model library.
+    the stored report, and the PDF never load a chat model library. A call
+    that fails does not stop the run: order, narration, and the lead each
+    fall back on their own.
     """
 
     from .report.chains import chains_or_none
 
     chains = chains_or_none()
-    return chains if chains is not None else _BeltOnlyPhraser()
+    return chains if chains is not None else FallbackModel()
 
 
 def _report_route(
@@ -433,14 +424,8 @@ def _report_route(
         return _guard_scene(scene_id, _get_report)
     if method == "GET" and leaf == ".pdf":
         return _guard_scene(scene_id, _report_pdf)
-    if method != "POST":
-        return None
-    if leaf == "/plan":
-        return _guard_scene(scene_id, lambda sid: _plan_report(sid, body))
-    if leaf == "/run":
+    if method == "POST" and leaf == "/run":
         return _guard_scene(scene_id, lambda sid: _run_report(sid, body, manager))
-    if leaf == "/amplitude":
-        return _guard_scene(scene_id, lambda sid: _run_amplitude(sid, body, manager))
     return None
 
 
@@ -461,7 +446,7 @@ def _get_report(scene_id: str) -> HttpResponse:
         LOGGER.error("report for %s could not be read: %s", scene_id, exc)
         return _plain(500, "The saved report could not be read")
     if report is None:
-        return _json(200, {"scene_id": scene_id, "question": "", "sections": []})
+        return _json(200, asdict(Report(scene_id=scene_id, question="")))
     return _json(200, asdict(report))
 
 
@@ -498,117 +483,99 @@ def _json_body(body: bytes) -> dict[str, object] | HttpResponse:
     return payload
 
 
-def _question(payload: dict[str, object]) -> str | HttpResponse:
-    """The trimmed question. Empty, missing, or over 2 KiB is a 400."""
+def _report_key(method: str, body: bytes) -> HttpResponse:
+    """Whether a model key is set, or a key to keep for this process only.
 
-    raw = payload.get("question")
-    if not isinstance(raw, str) or not raw.strip():
-        return _plain(400, "question must be a non-empty string")
-    question = raw.strip()
-    if len(question.encode("utf-8")) > _MAX_QUESTION_BYTES:
-        return _plain(400, f"question must be at most {_MAX_QUESTION_BYTES} bytes")
-    return question
+    The response never includes the key. A key that arrived from the
+    environment is left as it is.
+    """
 
+    from .report.chains import model_key_source, remember_model_key
 
-def _read_facts(scene_id: str) -> ReportFacts | HttpResponse:
-    try:
-        return report_facts(scene_id)
-    except (SceneDataError, OSError, ValueError) as exc:
-        return _plain(404, str(exc))
-
-
-def _plan_report(scene_id: str, body: bytes) -> HttpResponse:
-    """Ask the model which tools answer the question. Nothing is measured."""
-
+    if method == "GET":
+        return _json(200, _key_payload(model_key_source()))
     payload = _json_body(body)
     if isinstance(payload, HttpResponse):
         return payload
-    question = _question(payload)
-    if isinstance(question, HttpResponse):
-        return question
-    facts = _read_facts(scene_id)
-    if isinstance(facts, HttpResponse):
-        return facts
-    from .report.chains import chains_or_none
+    key = _api_key(payload)
+    if isinstance(key, HttpResponse):
+        return key
+    if model_key_source() == "environment":
+        return _plain(409, KEY_ALREADY_SET)
+    remember_model_key(key)
+    return _json(200, _key_payload("session"))
 
-    chains = chains_or_none()
-    if chains is None:
-        return _plain(409, NO_KEY_SENTENCE)
-    try:
-        raw = chains.plan(question, facts)
-    except Exception:  # noqa: BLE001 - a model failure is a gateway error.
-        # Model errors can carry keys, org names, or paths, so they stay in the log.
-        LOGGER.exception("report plan for %s failed", scene_id)
-        return _plain(502, REPORT_PLAN_FAILED)
-    return _json(200, asdict(validate_plan(facts, raw)))
+
+def _key_payload(source: str) -> dict[str, object]:
+    """The key status the page reads. ``source`` is never the key."""
+
+    return {"configured": source != "unset", "source": source}
+
+
+def _api_key(payload: dict[str, object]) -> str | HttpResponse:
+    """The trimmed key, or the 400 that says what is wrong with it."""
+
+    raw = payload.get("api_key")
+    if not isinstance(raw, str) or not raw.strip():
+        return _plain(400, "api_key must be a non-empty string")
+    key = raw.strip()
+    if any(character.isspace() for character in key):
+        return _plain(400, "api_key must not contain spaces")
+    if len(key) > _MAX_KEY_CHARS:
+        return _plain(400, f"api_key must be at most {_MAX_KEY_CHARS} characters")
+    return key
 
 
 def _run_report(
     scene_id: str, body: bytes, manager: MeasurementJobManager
 ) -> HttpResponse:
-    """Check the posted tool ids against fresh facts, then start the run."""
+    """Choose the tool set in code, then start the run on the measurement thread.
+
+    The body is ``partner_id`` null, or one scene id. A partner the belt cannot
+    compare is a 400. A scene with nothing unlocked does not start a job. No
+    key is a 409. A measurement that is already running is a 409.
+    """
 
     payload = _json_body(body)
     if isinstance(payload, HttpResponse):
         return payload
-    question = _question(payload)
-    if isinstance(question, HttpResponse):
-        return question
-    tool_ids = payload.get("tool_ids")
-    if not isinstance(tool_ids, list) or not all(
-        isinstance(item, str) for item in tool_ids
-    ):
-        return _plain(400, "tool_ids must be a list of strings")
-    facts = _read_facts(scene_id)
-    if isinstance(facts, HttpResponse):
-        return facts
-    plan = validate_plan(
-        facts, {"tools": tool_ids, "catalogue_only": [], "partner_id": None}
-    )
-    allowed = {*plan.selected, *plan.waiting}
-    unknown = [item for item in tool_ids if item not in allowed]
-    if unknown or not allowed:
-        return _plain(
-            400, f"Tools that cannot run for this scene: {unknown or 'none chosen'}"
-        )
-
-    def runner(on_step: OnStep) -> None:
-        run_report(scene_id, question, plan, _report_phraser(), on_step)
-
+    partner_id = _partner_field(payload)
+    if isinstance(partner_id, HttpResponse):
+        return partner_id
     try:
-        job_id = manager.start_report(runner)
-    except JobAlreadyRunningError:
-        return _json(409, {"status": "running"})
-    return _json(202, {"job_id": job_id, "status": "running"})
-
-
-def _run_amplitude(
-    scene_id: str, body: bytes, manager: MeasurementJobManager
-) -> HttpResponse:
-    """Run amplitude change against one eligible partner scene."""
-
-    payload = _json_body(body)
-    if isinstance(payload, HttpResponse):
-        return payload
-    partner_id = payload.get("partner_id")
-    if not isinstance(partner_id, str) or not _PARTNER_ID.fullmatch(partner_id):
-        return _plain(400, "partner_id must be one scene id")
-    try:
-        views = {item.id: item for item in tools_for_scene(scene_id)}
-    except (SceneDataError, OSError, ValueError) as exc:
+        chosen = choose_tools(scene_id, partner_id)
+    except IneligiblePartner:
+        return _plain(400, "partner_id is not a scene this report can compare.")
+    except (SceneDataError, OSError, ValueError, KeyError, RuntimeError) as exc:
         return _plain(404, str(exc))
-    amplitude = views.get(_AMPLITUDE_TOOL)
-    if amplitude is None or amplitude.locked or partner_id not in amplitude.partners:
-        return _plain(400, "partner_id is not a scene amplitude change can compare")
+    if not chosen.runnable_ids:
+        return _plain(400, nothing_runnable_sentence(chosen))
+    from .report.chains import model_key_source
+
+    if model_key_source() == "unset":
+        return _plain(409, NO_KEY_SENTENCE)
 
     def runner(on_step: OnStep) -> None:
-        run_amplitude(scene_id, partner_id, _report_phraser(), on_step)
+        run_report(scene_id, chosen, _report_model(), on_step)
 
     try:
         job_id = manager.start_report(runner)
     except JobAlreadyRunningError:
         return _json(409, {"status": "running"})
     return _json(202, {"job_id": job_id, "status": "running"})
+
+
+def _partner_field(payload: dict[str, object]) -> str | None | HttpResponse:
+    """Null, or one scene id. Anything else is a 400."""
+
+    if "partner_id" not in payload:
+        return _plain(400, "partner_id must be null or one scene id")
+    value = payload["partner_id"]
+    if value is None:
+        return None
+    if isinstance(value, str) and _PARTNER_ID.fullmatch(value):
+        return value
+    return _plain(400, "partner_id must be null or one scene id")
 
 
 def _clear_demo(body: bytes) -> HttpResponse:

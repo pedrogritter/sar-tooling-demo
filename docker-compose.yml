@@ -6,6 +6,9 @@ services:
     environment:
       SCENE_HOST: 0.0.0.0
       SCENE_PORT: "8765"
+      # From the shell, or from a gitignored .env beside this file. Empty when
+      # neither is set. The image build does not receive the key.
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
     volumes:
       - scene-data:/app/data
 

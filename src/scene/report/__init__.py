@@ -1,1 +1,1 @@
-"""The scene report: facts read from disk, then a plan checked against them."""
+"""The scene report: one run over the tools this scene can support."""

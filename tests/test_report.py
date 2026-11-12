@@ -11,7 +11,7 @@ from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
-from unittest.mock import patch
+from unittest.mock import call, patch
 
 from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_core.messages import AIMessage, BaseMessage
@@ -19,12 +19,20 @@ from langchain_core.outputs import ChatGeneration, ChatResult
 from langchain_core.runnables import Runnable, RunnableLambda
 from pydantic import Field
 
+from scene.belt.catalog import ToolView, tool_spec
+from scene.belt.run import LIMITS
 from scene.catalog import CatalogRecord
-from scene.paths import LISBON_SCENE_ID
-from scene.report.chains import PlanChoice, ReportChains, chains_or_none
+from scene.paths import LISBON_SCENE_ID, project_root
+from scene.report.chains import (
+    OrderChoice,
+    ReportChains,
+    chains_or_none,
+    model_key_source,
+    remember_model_key,
+)
 from scene.report.facts import ReportFacts, report_facts
-from scene.report.schema import ReportPlan
-from scene.report.validate import validate_plan
+from scene.report.select import STACK_SCOPE, IneligiblePartner, choose_tools
+from scene.report.store import ReportSection
 from tests import test_belt
 
 OPEN_ID = "ICEYE_A_20260211T000000Z_1_X1_SM"
@@ -215,15 +223,19 @@ def _tool(
     locked: bool = False,
     reason: str | None = None,
     partners: list[str] | None = None,
+    **extra: object,
 ) -> dict[str, object]:
     """The public keys a report reads from tools_for_scene().to_public()."""
 
     return {
         "id": tool_id,
+        "label": extra.get("label", tool_id),
+        "description": extra.get("description", ""),
         "locked": locked,
         "reason": reason,
         "needs_partner": partners is not None,
         "partners": partners or [],
+        **extra,
     }
 
 
@@ -251,96 +263,168 @@ LOCK_REASON = "Needs a scene with the same look."
 CATALOGUE_ROW = {"scene_id": CACHED_ID, "collected_at": "20260213T000000Z"}
 
 
-class ValidatePlanTests(unittest.TestCase):
-    def setUp(self) -> None:
-        self.facts = _facts(
-            [
-                _tool("open-water"),
-                _tool("amplitude-change", partners=[NEIGHBOUR_ID]),
-                _tool("dwell-motion", locked=True, reason=LOCK_REASON),
-            ],
-            [CATALOGUE_ROW],
-        )
+def _view(
+    tool_id: str,
+    *,
+    locked: bool = False,
+    reason: str = "",
+    partners: tuple[str, ...] = (),
+) -> ToolView:
+    """A belt view with the real kind, label, and description for ``tool_id``."""
 
-    def test_an_invented_id_is_dropped(self) -> None:
-        plan = validate_plan(self.facts, {"tools": ["open-water", "made-up-tool"]})
-        self.assertIsInstance(plan, ReportPlan)
-        self.assertEqual(plan.selected, ["open-water"])
+    spec = tool_spec(tool_id)
+    return ToolView(
+        id=spec.id,
+        label=spec.label,
+        category=spec.category,
+        description=spec.description,
+        locked=locked,
+        reason=reason if locked else "",
+        needs_partner=spec.kind == "pair",
+        partners=partners,
+        overview_url=None,
+        measurement=None,
+        briefing_html=None,
+    )
 
-    def test_a_locked_id_is_dropped_but_still_reported_as_locked(self) -> None:
-        plan = validate_plan(self.facts, {"tools": ["open-water", "dwell-motion"]})
-        self.assertEqual(plan.selected, ["open-water"])
-        self.assertEqual(
-            [(item.id, item.reason) for item in plan.locked],
-            [("dwell-motion", LOCK_REASON)],
-        )
 
-    def test_locked_tools_are_listed_even_when_the_model_names_nothing(self) -> None:
-        plan = validate_plan(self.facts, {})
-        self.assertEqual(plan.selected, [])
-        self.assertEqual([item.id for item in plan.locked], ["dwell-motion"])
+class ChooseToolsTests(unittest.TestCase):
+    """Code chooses the set. No partner leaves change and stack out, locks included."""
 
-    def test_amplitude_change_lands_in_waiting_with_a_partner_suggestion(self) -> None:
-        plan = validate_plan(
-            self.facts,
-            {"tools": ["open-water", "amplitude-change"], "partner_id": NEIGHBOUR_ID},
-        )
-        self.assertEqual(plan.selected, ["open-water"])
-        self.assertEqual(plan.waiting, ["amplitude-change"])
-        self.assertEqual(plan.partner_id, NEIGHBOUR_ID)
-
-    def test_a_partner_that_is_not_eligible_is_dropped(self) -> None:
-        for partner in ("ICEYE_Z_20260301T000000Z_1_X1_SM", 7, None):
-            with self.subTest(partner=partner):
-                plan = validate_plan(
-                    self.facts,
-                    {"tools": ["amplitude-change"], "partner_id": partner},
-                )
-                self.assertEqual(plan.waiting, ["amplitude-change"])
-                self.assertIsNone(plan.partner_id)
-
-    def test_a_locked_amplitude_change_has_no_waiting_and_no_partner(self) -> None:
-        facts = _facts(
-            [_tool("amplitude-change", locked=True, reason=LOCK_REASON, partners=[])]
-        )
-        plan = validate_plan(
-            facts, {"tools": ["amplitude-change"], "partner_id": NEIGHBOUR_ID}
-        )
-        self.assertEqual(plan.waiting, [])
-        self.assertIsNone(plan.partner_id)
-        self.assertEqual(plan.selected, [])
-
-    def test_amplitude_change_that_is_not_named_is_not_waiting(self) -> None:
-        plan = validate_plan(self.facts, {"tools": ["open-water"]})
-        self.assertEqual(plan.waiting, [])
-        self.assertIsNone(plan.partner_id)
-
-    def test_a_catalogue_id_the_facts_do_not_list_is_dropped(self) -> None:
-        plan = validate_plan(
-            self.facts,
-            {"catalogue_only": [CACHED_ID, "ICEYE_Z_20260301T000000Z_1_X1_SM"]},
-        )
-        self.assertEqual(plan.catalogue_only, [CATALOGUE_ROW])
-
-    def test_malformed_model_output_gives_an_empty_plan(self) -> None:
-        malformed: list[object] = [
-            None,
-            "text",
-            [],
-            {"tools": "open-water"},
-            {"tools": [1, None]},
+    def _views(self) -> list[ToolView]:
+        return [
+            _view("open-water"),
+            _view(
+                "dwell-motion",
+                locked=True,
+                reason="This collect has no dwell stack.",
+            ),
+            _view("amplitude-change", partners=(NEIGHBOUR_ID,)),
+            _view("water-persistence", partners=(NEIGHBOUR_ID,)),
+            _view(
+                "sea-state",
+                locked=True,
+                reason="This stack tool needs another calibrated scene.",
+                partners=(NEIGHBOUR_ID,),
+            ),
+            _view(
+                "stack-mean",
+                locked=True,
+                reason="The stack mean needs five calibrated scenes.",
+                partners=(NEIGHBOUR_ID,),
+            ),
         ]
-        for raw in malformed:
-            with self.subTest(raw=raw):
-                plan = validate_plan(self.facts, raw)
-                self.assertEqual(plan.selected, [])
-                self.assertEqual(plan.waiting, [])
-                self.assertEqual(plan.catalogue_only, [])
-                self.assertIsNone(plan.partner_id)
 
-    def test_repeated_ids_are_kept_once(self) -> None:
-        plan = validate_plan(self.facts, {"tools": ["open-water", "open-water"]})
-        self.assertEqual(plan.selected, ["open-water"])
+    def test_no_partner_omits_change_and_stack_including_their_lock_lines(self) -> None:
+        with patch("scene.report.select.tools_for_scene", return_value=self._views()):
+            chosen = choose_tools(OPEN_ID, None)
+        self.assertEqual(
+            [tool.id for tool in chosen.tools], ["open-water", "dwell-motion"]
+        )
+        self.assertTrue(chosen.tools[1].locked)
+        self.assertIsNone(chosen.partner_id)
+        self.assertIsNone(chosen.matched_dates)
+        self.assertEqual(chosen.runnable_ids, ["open-water"])
+
+    def test_a_partner_adds_change_and_keeps_locked_stack_tools(self) -> None:
+        with patch("scene.report.select.tools_for_scene", return_value=self._views()):
+            chosen = choose_tools(OPEN_ID, NEIGHBOUR_ID)
+        self.assertEqual(
+            [tool.id for tool in chosen.tools],
+            [
+                "open-water",
+                "dwell-motion",
+                "amplitude-change",
+                "water-persistence",
+                "sea-state",
+                "stack-mean",
+            ],
+        )
+        locked = {tool.id: tool for tool in chosen.tools if tool.locked}
+        self.assertEqual(
+            locked["sea-state"].reason,
+            "This stack tool needs another calibrated scene.",
+        )
+        self.assertEqual(
+            locked["stack-mean"].reason,
+            "The stack mean needs five calibrated scenes.",
+        )
+        self.assertEqual(chosen.matched_dates, 2)
+        self.assertNotIn("sea-state", chosen.runnable_ids)
+        self.assertNotIn("stack-mean", chosen.runnable_ids)
+
+    def test_locked_stack_tools_are_sections_and_are_not_a_comparison(self) -> None:
+        views = [
+            _view("open-water"),
+            _view("amplitude-change", partners=(NEIGHBOUR_ID,)),
+            _view(
+                "water-persistence",
+                locked=True,
+                reason="This stack tool is locked.",
+                partners=(NEIGHBOUR_ID,),
+            ),
+            _view(
+                "stack-mean",
+                locked=True,
+                reason="The stack mean is locked.",
+                partners=(NEIGHBOUR_ID,),
+            ),
+        ]
+        with patch("scene.report.select.tools_for_scene", return_value=views):
+            chosen = choose_tools(OPEN_ID, NEIGHBOUR_ID)
+        self.assertEqual(
+            [(tool.id, tool.locked) for tool in chosen.tools],
+            [
+                ("open-water", False),
+                ("amplitude-change", False),
+                ("water-persistence", True),
+                ("stack-mean", True),
+            ],
+        )
+        self.assertEqual(chosen.tools[2].reason, "This stack tool is locked.")
+        self.assertIsNone(chosen.matched_dates)
+        self.assertEqual(chosen.runnable_ids, ["open-water", "amplitude-change"])
+
+    def test_an_ineligible_or_locked_partner_is_rejected(self) -> None:
+        views = self._views()
+        with patch("scene.report.select.tools_for_scene", return_value=views):
+            with self.assertRaises(IneligiblePartner):
+                choose_tools(OPEN_ID, "ICEYE_Z_20260301T000000Z_1_X1_SM")
+        locked = [
+            _view("open-water"),
+            _view(
+                "amplitude-change",
+                locked=True,
+                reason=LOCK_REASON,
+                partners=(NEIGHBOUR_ID,),
+            ),
+        ]
+        with (
+            patch("scene.report.select.tools_for_scene", return_value=locked),
+            self.assertRaises(IneligiblePartner),
+        ):
+            choose_tools(OPEN_ID, NEIGHBOUR_ID)
+
+
+class GlossaryTests(unittest.TestCase):
+    def test_glossary_repeats_the_belt_limits_and_the_named_terms(self) -> None:
+        text = (project_root() / "content" / "sar_glossary.md").read_text(
+            encoding="utf-8"
+        )
+        lowered = text.lower()
+        for term in (
+            "sigma-nought",
+            "layover",
+            "incidence",
+            "speckle",
+            "look side",
+            "double-bounce",
+            "overview scale",
+        ):
+            self.assertIn(term, lowered)
+        for sentence in LIMITS.values():
+            self.assertIn(sentence, text)
+        self.assertIn(STACK_SCOPE, text)
 
 
 class FakeChatModel(BaseChatModel):
@@ -427,7 +511,13 @@ class ChainsOrNoneTests(unittest.TestCase):
         ):
             chains = chains_or_none()
         self.assertIsInstance(chains, ReportChains)
-        chat.assert_called_once_with(model="gpt-4o-mini", temperature=0)
+        self.assertEqual(
+            chat.call_args_list,
+            [
+                call(model="gpt-4o-mini", temperature=0),
+                call(model="gpt-4o-mini", temperature=0.7),
+            ],
+        )
 
     def test_an_existing_environment_value_wins_over_dotenv(self) -> None:
         with (
@@ -437,7 +527,49 @@ class ChainsOrNoneTests(unittest.TestCase):
             ) as chat,
         ):
             self.assertIsInstance(chains_or_none(), ReportChains)
-        chat.assert_called_once()
+        self.assertEqual(chat.call_count, 2)
+
+    def tearDown(self) -> None:
+        from scene.report import chains
+
+        chains._session_key = None
+
+    def test_source_follows_the_environment(self) -> None:
+        with self._environment(None):
+            self.assertEqual(model_key_source(), "unset")
+        with self._environment(None, OPENAI_API_KEY="from-environment"):
+            self.assertEqual(model_key_source(), "environment")
+
+    def test_a_remembered_key_is_session_and_builds_the_model(self) -> None:
+        with (
+            self._environment(None),
+            patch(
+                "scene.report.chains.ChatOpenAI", return_value=FakeChatModel()
+            ) as chat,
+        ):
+            remember_model_key("from-session")
+            self.assertEqual(model_key_source(), "session")
+            self.assertIsInstance(chains_or_none(), ReportChains)
+        self.assertEqual(
+            chat.call_args_list,
+            [
+                call(model="gpt-4o-mini", temperature=0),
+                call(model="gpt-4o-mini", temperature=0.7),
+            ],
+        )
+
+    def test_remember_rejects_a_blank_key(self) -> None:
+        with self.assertRaises(ValueError):
+            remember_model_key("   ")
+
+
+def _runnable_tool() -> dict[str, str]:
+    return {
+        "id": "open-water",
+        "label": "Open water",
+        "description": "Dark water as a share of the frame.",
+        "overview_url": "/overview-url-leak.png",
+    }
 
 
 class ReportChainsTests(unittest.TestCase):
@@ -447,9 +579,11 @@ class ReportChainsTests(unittest.TestCase):
         self.facts = _facts(
             [
                 {
-                    **_tool("open-water"),
-                    "label": "Open water",
-                    "description": "Dark water as a share of the frame.",
+                    **_tool(
+                        "open-water",
+                        label="Open water",
+                        description="Dark water as a share of the frame.",
+                    ),
                     "overview_url": "/overview-url-leak.png",
                     "measurement": "measurement-leak",
                     "briefing_html": "<p>briefing-leak</p>",
@@ -458,142 +592,150 @@ class ReportChainsTests(unittest.TestCase):
             ],
             [CATALOGUE_ROW],
         )
+        self.steady = FakeChatModel()
+        self.narrator = FakeChatModel()
 
-    def test_plan_returns_exactly_the_keys_the_validator_reads(self) -> None:
-        model = FakeChatModel(
-            plan=PlanChoice(
-                tools=["open-water"], catalogue_only=[CACHED_ID], partner_id=None
-            )
-        )
-        plan = ReportChains(model).plan("How dark is the water?", self.facts)
-        self.assertEqual(
-            plan,
-            {
-                "tools": ["open-water"],
-                "catalogue_only": [CACHED_ID],
-                "partner_id": None,
-            },
-        )
+    def chains(self, steady: FakeChatModel | None = None) -> ReportChains:
+        return ReportChains(steady or self.steady, self.narrator)
 
-    def test_plan_does_not_drop_ids_and_validate_plan_does(self) -> None:
-        raw: dict[str, Any] = {
-            "tools": ["open-water", "invented"],
-            "catalogue_only": ["ICEYE_Z_20260301T000000Z_1_X1_SM"],
-            "partner_id": "nobody",
-        }
-        for model_output in (raw, PlanChoice(**raw)):
+    def test_order_returns_the_model_list_even_when_it_is_not_a_permutation(
+        self,
+    ) -> None:
+        raw: dict[str, Any] = {"tools": ["open-water", "invented"]}
+        for model_output in (raw, OrderChoice(tools=["open-water", "invented"])):
             with self.subTest(kind=type(model_output).__name__):
-                chains = ReportChains(FakeChatModel(plan=model_output))
-                plan = chains.plan("Anything?", self.facts)
-                self.assertEqual(plan, raw)
-                self.assertEqual(
-                    validate_plan(self.facts, plan).selected, ["open-water"]
+                model = FakeChatModel(plan=model_output)
+                ordered = ReportChains(model, model).order(
+                    self.facts, [_runnable_tool()]
                 )
+                self.assertEqual(ordered, ["open-water", "invented"])
 
-    def test_plan_prompt_names_the_question_the_tools_and_the_catalogue(self) -> None:
-        model = FakeChatModel(
-            plan={"tools": [], "catalogue_only": [], "partner_id": None}
-        )
-        ReportChains(model).plan("How dark is the water?", self.facts)
+    def test_order_prompt_names_the_tools_and_drops_rasters_and_the_catalogue(
+        self,
+    ) -> None:
+        model = FakeChatModel(plan={"tools": ["open-water"]})
+        facts = dataclasses.replace(self.facts, scene_id=LISBON_SCENE_ID)
+        ReportChains(model, model).order(facts, [_runnable_tool()])
         prompt = model.prompt_text()
         for expected in (
-            "How dark is the water?",
             "open-water",
             "Dark water as a share of the frame.",
-            "amplitude-change",
-            NEIGHBOUR_ID,
-            CACHED_ID,
-            "only the tools that answer the question",
+            "Use each id once",
+            LISBON_SCENE_ID,
         ):
             self.assertIn(expected, prompt)
-        for leak in ("overview-url-leak", "measurement-leak", "briefing-leak"):
+        note = (project_root() / "content" / "scene_note.md").read_text(
+            encoding="utf-8"
+        )
+        self.assertNotIn(note.splitlines()[2], prompt)
+        for leak in (
+            "overview-url-leak",
+            "measurement-leak",
+            "briefing-leak",
+            CACHED_ID,
+            ".tif",
+            ".png",
+        ):
             self.assertNotIn(leak, prompt)
 
-    def test_every_catalogue_candidate_carries_the_not_downloaded_line(self) -> None:
-        """The planner is told the GRD is absent, and still cannot invent an id."""
-        model = FakeChatModel(
-            plan={"tools": [], "catalogue_only": [], "partner_id": None}
-        )
-        ReportChains(model).plan("Is there another date?", self.facts)
-        prompt = model.prompt_text()
-        self.assertIn(CACHED_ID, prompt)
-        self.assertIn("In the catalogue. The GRD is not downloaded.", prompt)
+    def test_a_non_list_order_raises_so_the_run_can_fall_back(self) -> None:
+        model = FakeChatModel(plan={"tools": "open-water"})
+        with self.assertRaises(ValueError):
+            ReportChains(model, model).order(self.facts, [_runnable_tool()])
 
-    def test_the_line_does_not_let_the_model_add_an_unlisted_id(self) -> None:
-        raw = {"catalogue_only": [CACHED_ID, "ICEYE_Z_20260301T000000Z_1_X1_SM"]}
-        plan = validate_plan(self.facts, raw)
-        self.assertEqual([row["scene_id"] for row in plan.catalogue_only], [CACHED_ID])
-
-    def test_scene_note_is_in_the_plan_prompt_only_for_the_lisbon_scene(self) -> None:
-        note = "No detector labelled this frame."
-        for scene_id, present in ((LISBON_SCENE_ID, True), (OPEN_ID, False)):
-            with self.subTest(scene_id=scene_id):
-                model = FakeChatModel(plan={})
-                facts = dataclasses.replace(self.facts, scene_id=scene_id)
-                ReportChains(model).plan("What is here?", facts)
-                self.assertEqual(note in model.prompt_text(), present)
-
-    def test_phrase_prompt_carries_the_measurement_limit_and_scene_fields(self) -> None:
-        model = FakeChatModel(text="The water covers 12.5 % of the frame.")
-        measurement = {
-            "tool_id": "open-water",
-            "summary": [{"label": "Water area", "value": "12.5 %"}],
-            "limit": "Dark pixels are not proof of water.",
-            "overview_path": "/data/overview-path-leak.png",
-        }
-        facts = dataclasses.replace(self.facts, overview_metres=(1.25, 2.5))
-        text = ReportChains(model).phrase("How dark?", facts, measurement)
-        self.assertEqual(text, "The water covers 12.5 % of the frame.")
+    def test_narrator_prompt_names_the_mode_and_does_not_invent_a_target(self) -> None:
+        model = FakeChatModel(text="Dark water on this stripmap pass, nothing named.")
+        text = ReportChains(self.steady, model).narrate(self.facts, _runnable_tool())
+        self.assertEqual(text, "Dark water on this stripmap pass, nothing named.")
         prompt = model.prompt_text()
         for expected in (
-            "How dark?",
-            "Water area",
+            "stripmap",
+            "Open water",
+            "ship",
+            "spill",
+            "tide",
+            "building",
+        ):
+            self.assertIn(expected, prompt)
+        self.assertNotIn("overview-url-leak", prompt)
+        self.assertNotIn(".png", prompt)
+
+    def test_synthesis_prompt_carries_rows_limits_failures_locks_and_the_glossary(
+        self,
+    ) -> None:
+        model = FakeChatModel(text="A hedged reading.")
+        facts = dataclasses.replace(self.facts, overview_metres=(1.25, 2.5))
+        done = ReportSection(
+            tool_id="open-water",
+            status="done",
+            measurement={
+                "summary": [{"label": "Water area", "value": "12.5 %"}],
+                "limit": "Dark pixels are not proof of water.",
+                "overview_path": "/data/overview-path-leak.png",
+            },
+            briefing_md="belt briefing",
+            briefing_source="belt",
+            overview_url="/api/overview-url-leak.png",
+            partner_id=None,
+            progress_note="A joke about a ship that must stay off the page.",
+        )
+        locked = ReportSection(
+            tool_id="dwell-motion",
+            status="locked",
+            measurement=None,
+            briefing_md=LOCK_REASON,
+            briefing_source="belt",
+            overview_url=None,
+            partner_id=None,
+        )
+        failed = ReportSection(
+            tool_id="sea-roughness",
+            status="failed",
+            measurement=None,
+            briefing_md="sea-roughness could not run.",
+            briefing_source="belt",
+            overview_url=None,
+            partner_id=None,
+        )
+        text = ReportChains(model, self.narrator).synthesize(
+            facts,
+            NEIGHBOUR_ID,
+            [done, locked, failed],
+            "Sigma-nought is radar brightness.",
+            stack_scope=STACK_SCOPE,
+            matched_dates=2,
+        )
+        self.assertEqual(text, "A hedged reading.")
+        prompt = model.prompt_text()
+        for expected in (
             "12.5 %",
             "Dark pixels are not proof of water.",
+            LOCK_REASON,
+            "sea-roughness could not run.",
+            "Sigma-nought is radar brightness.",
+            NEIGHBOUR_ID,
             "stripmap",
-            "26.0",
-            "ascending",
-            "right",
             "1.25",
             "2.5",
-            "limit sentence unchanged",
+            STACK_SCOPE,
+            "hedged reading",
             "ship",
             "spill",
             "tide height",
-            "cause",
+            "building height",
+            "A bright return stays a bright radar return.",
         ):
             self.assertIn(expected, prompt)
-        self.assertNotIn("overview-path-leak", prompt)
-
-    def test_phraser_system_prompt_says_a_bright_mark_stays_a_radar_return(
-        self,
-    ) -> None:
-        """The claim limit sits in the prompt, next to the forbid list."""
-        model = FakeChatModel()
-        ReportChains(model).phrase(
-            "How dark?", self.facts, {"summary": [], "limit": "A limit."}
-        )
-        self.assertIn(
-            "A bright mark stays a bright radar return.", model.prompt_text()
-        )
-
-    def test_phrase_prompt_is_not_given_other_tools_or_raster_data(self) -> None:
-        model = FakeChatModel()
-        ReportChains(model).phrase(
-            "How dark?",
-            self.facts,
-            {"summary": [], "limit": "A limit."},
-        )
-        prompt = model.prompt_text()
-        for leak in ("amplitude-change", "measurement-leak", CACHED_ID, ".tif", ".png"):
+        for leak in (
+            "overview-path-leak",
+            "overview-url-leak",
+            "A joke about a ship",
+            CACHED_ID,
+            ".tif",
+            ".png",
+            "No detector labelled this frame.",
+        ):
             self.assertNotIn(leak, prompt)
-
-    def test_phrase_says_the_scale_is_unavailable_when_there_is_none(self) -> None:
-        model = FakeChatModel()
-        ReportChains(model).phrase(
-            "How dark?", self.facts, {"summary": [], "limit": "A limit."}
-        )
-        self.assertIn("null", model.prompt_text())
 
 
 if __name__ == "__main__":

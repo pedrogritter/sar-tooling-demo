@@ -15,8 +15,18 @@ RUN pnpm build
 
 FROM python:3.12-slim-bookworm
 
+# Pango, Cairo, and GDK-Pixbuf are what WeasyPrint draws with. Liberation is the
+# document font, so a missing glyph is not a silent fallback to another face.
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends curl \
+    && apt-get install -y --no-install-recommends \
+        curl \
+        libcairo2 \
+        libgdk-pixbuf-2.0-0 \
+        libharfbuzz0b \
+        libpango-1.0-0 \
+        libpangoft2-1.0-0 \
+        fonts-liberation \
+        shared-mime-info \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
