@@ -190,37 +190,45 @@ export interface AnalysisToolsResponse {
   tools: AnalysisTool[]
 }
 
-/** One tool the belt keeps locked for this scene, with the belt's own reason. */
-export interface ReportLockedTool {
-  id: string
-  reason: string | null
-}
-
-/** The checked plan returned by POST /api/scenes/<id>/report/plan. */
-export interface ReportPlan {
-  selected: string[]
-  waiting: string[]
-  locked: ReportLockedTool[]
-  catalogue_only: Record<string, string>[]
-  partner_id: string | null
-}
-
 export type ReportSectionStatus =
   "done" | "waiting" | "locked" | "running" | "failed"
 
-/** One section of GET /api/scenes/<id>/report. */
+export type ReportPhase = "planning" | "running" | "writing" | "done"
+
+export type ReportTextSource = "model" | "belt"
+
+/** One section of GET /api/scenes/<id>/report. Partial while a job runs. */
 export interface ReportSection {
   tool_id: string
   status: ReportSectionStatus
   measurement: Measurement | null
   briefing_md: string
-  briefing_source: "model" | "belt"
+  briefing_source: ReportTextSource
   overview_url: string | null
   partner_id: string | null
+  /** Narrator line for the live rail. It is not part of the finished document. */
+  progress_note: string
 }
 
+/**
+ * The saved report. `question` stays in the file and is empty for a new run.
+ * The page does not ask for one.
+ */
 export interface Report {
   scene_id: string
   question: string
+  partner_id: string | null
+  phase: ReportPhase
+  tool_order: string[]
+  synthesis_md: string
+  synthesis_source: ReportTextSource
   sections: ReportSection[]
+}
+
+/** Whether this process can call the model. The key itself is never sent. */
+export type ModelKeySource = "unset" | "environment" | "session"
+
+export interface ModelKeyStatus {
+  configured: boolean
+  source: ModelKeySource
 }

@@ -7,8 +7,8 @@ import type {
   JobSnapshot,
   LibraryResponse,
   MeasureJobAccepted,
+  ModelKeyStatus,
   Report,
-  ReportPlan,
   SceneResponse,
 } from "@/types"
 
@@ -153,37 +153,48 @@ export async function fetchReport(sceneId: string): Promise<Report> {
   return requestReportJson<Report>(reportPath(sceneId))
 }
 
-/** Ask the model which tools answer the question. Nothing is measured. */
-export async function planReport(
-  sceneId: string,
-  question: string
-): Promise<ReportPlan> {
-  return requestReportJson<ReportPlan>(`${reportPath(sceneId)}/plan`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ question }),
-  })
+/**
+ * The sentence a missing key returns as 409. Any other 409 means a measurement
+ * is already running and the page keeps watching that job.
+ */
+export const REPORT_KEY_REQUIRED = "Set OPENAI_API_KEY to ask a question."
+
+/** True when Start was refused because this server has no OpenAI key. */
+export function isReportKeyRequiredError(error: unknown): boolean {
+  return (
+    error instanceof ApiError &&
+    error.status === 409 &&
+    error.message.trim() === REPORT_KEY_REQUIRED
+  )
 }
 
-/** Start the report job for the chosen tool ids. */
+/**
+ * Start the one report job. `partnerId` null is this scene only. A scene id
+ * adds that partner. The body has no question and no tool ids.
+ */
 export async function startReportRun(
   sceneId: string,
-  question: string,
-  toolIds: string[]
+  partnerId: string | null
 ): Promise<MeasureJobAccepted> {
   return startReportJob(`${reportPath(sceneId)}/run`, {
-    question,
-    tool_ids: toolIds,
+    partner_id: partnerId,
   })
 }
 
-/** Run amplitude change against one partner and replace only that section. */
-export async function startReportAmplitude(
-  sceneId: string,
-  partnerId: string
-): Promise<MeasureJobAccepted> {
-  return startReportJob(`${reportPath(sceneId)}/amplitude`, {
-    partner_id: partnerId,
+/** Whether this server has a model key. The body never contains the key. */
+export async function fetchModelKey(): Promise<ModelKeyStatus> {
+  return requestReportJson<ModelKeyStatus>("/api/report/key")
+}
+
+/**
+ * Keep a key for this server process. A key that arrived from the environment
+ * is refused, and the response does not echo the key.
+ */
+export async function saveModelKey(apiKey: string): Promise<ModelKeyStatus> {
+  return requestReportJson<ModelKeyStatus>("/api/report/key", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ api_key: apiKey }),
   })
 }
 
@@ -207,8 +218,14 @@ async function startReportJob(
       body: JSON.stringify(payload),
     })
   } catch (error) {
+    // A missing key stays a plain 409 so Start does not watch a job that
+    // never began. Every other 409 is a measurement already running.
+    if (isReportKeyRequiredError(error)) {
+      throw error
+    }
+
     if (error instanceof ApiError && error.status === 409) {
-      throw new MeasureJobConflictError()
+      throw new MeasureJobConflictError(error.message || undefined)
     }
 
     throw error
@@ -249,6 +266,11 @@ async function plainErrorMessage(response: Response): Promise<string> {
 
     if (isRecord(body) && typeof body.message === "string") {
       return body.message
+    }
+
+    // A measurement already running is JSON `{ "status": "running" }`.
+    if (isRecord(body) && body.status === "running") {
+      return "A measurement job is already running."
     }
 
     return fallback
