@@ -1,39 +1,26 @@
-# Lisbon spotlight scene
+# sar-tooling-demo
 
-The current description of the application — objectives, architecture, features, how to work on it, and open work — is [docs/application.md](docs/application.md). Update that file when the application changes. This README stays the checkout and run sheet.
+Local viewer for ICEYE open-data SAR. A person can search the public catalogue, download a scene onto this machine, and measure only what the rasters support.
 
-Public ICEYE scene `ICEYE_EYCKP5_20251024T135309Z_6724574_X52_SLF`, from the [ICEYE open data catalogue](https://www.iceye.com/open-data-initiative), licensed [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/). This repository does not include the radar files.
+The built-in example is the Lisbon spotlight collect `ICEYE_EYCKP5_20251024T135309Z_6724574_X52_SLF` (ICEYE-X52, 24 October 2025, 25 de Abril bridge). The radar files are not in git. The scene and the catalogue are from the [ICEYE open data catalogue](https://www.iceye.com/open-data-initiative), licensed [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/).
 
-Collected 24 October 2025, 13:53 UTC, by ICEYE-X52. Spotlight, X-band, VV. The footprint covers the 25 de Abril bridge. The package name is `scene`. This checkout points `src/scene/fetch.py` at this collect, and `content/scene_note.md` is the note for it.
+Architecture, what the page may claim, and how the pieces fit are in [docs/application.md](docs/application.md).
 
-## Layout
+## Quickstart
 
-| Path | Role |
-| --- | --- |
-| `src/scene/` | Python package: fetch the STAC assets, measure them, and serve the page |
-| `frontend/` | Vite and React page. Node 26.13.0. `pnpm --dir frontend build` writes `frontend/dist` |
-| `Dockerfile`, `docker-compose.yml` | One image and one command. Radar files stay on the volume |
-| `demo/build_seed.py` | Copies the committed Lisbon tree, or draws the placeholder when `demo/lisbon` is missing |
-| `content/scene_note.md` | Person-written note shown on the fallback page |
-| `data/` | Downloaded scenes in `data/scenes/<id>/`, plus the catalog index. Gitignored |
-| `intelligence/` | Measurement outputs. `overview.png` is gitignored |
-| `tests/` | Python tests |
-
-## Run
-
-From a fresh clone, one command builds the image and serves the page:
+From a fresh clone:
 
 ```bash
 docker compose up --build
 ```
 
-Open http://127.0.0.1:8765. `docker compose up` copies the committed Lisbon preview, thumbnail, dwell video, and analysis results. It does not contain a GRD, an SLC, a colorized image, a dwell stack, or a quicklook COG. The drawn placeholder remains only when `demo/lisbon` is missing. That drawing writes `demo.json`, and the banner says those pictures and numbers were not measured from an ICEYE raster. **Clear demo data** removes the pictures and leaves the STAC record. It does not come back on the next start while that record is there. If the record is removed and the scene folder is empty, the next start seeds again. A folder that already has files is not overwritten. A catalog download or `python -m scene.fetch` of that same scene removes the placeholder when the download finishes. A failed download leaves it in place. `docker compose down -v` deletes the volume, and the next `up` seeds again.
+Open http://127.0.0.1:8765. The page shows the committed Lisbon preview, thumbnail, dwell video, and analysis results. The image does not contain a GRD, an SLC, a colorized image, a dwell stack, or a quicklook COG.
 
-Set `OPENAI_API_KEY` before `docker compose up` when the model should order the tools and write the lead. Compose reads it from the shell or from a gitignored `.env` next to `docker-compose.yml` and passes it into the container. The image build does not take the key. If it is missing, Start still measures and the lead is built from the summary rows. The report page can keep a key in that server process only. Restarting the container clears a key entered on the page. A key set in the environment is not replaced from the page. The page does not ask for a question. Start runs the tools the scene can support.
+Seeding, the drawn placeholder, and `docker compose down -v` are described in [docs/application.md](docs/application.md).
 
-`SCENE_HOST` is `0.0.0.0` inside the container. The published port is 8765.
+## Develop
 
-To work on the code, run these from the repository root, the directory that contains `pyproject.toml`. The frontend expects Node 26.13.0 (`frontend/.nvmrc`).
+Run these from the repository root, the directory that contains `pyproject.toml`. On this machine `python` is Python 2.7 and `python3` is 3.12. Call `.venv/bin/python`.
 
 ```bash
 python3 -m venv .venv
@@ -45,58 +32,23 @@ pnpm --dir frontend build
 .venv/bin/python -m scene.serve
 ```
 
-`python` and `python3` are not the same program here. `python` is `/usr/bin/python`, Python 2.7. `python3` is Python 3.12, and `python3 -m venv .venv` builds the virtualenv from that interpreter. `.venv/bin/pip install -e .` then installs the `scene` package into that virtualenv only. Creating the virtualenv does not change what the command `python` means, and the README does not activate it, so a later `python -m scene.fetch` still runs Python 2.7. That interpreter has no `scene` install, and from the repository root it cannot see `src/scene` either, so it stops with `No module named scene`.
+Open http://127.0.0.1:8765.
 
-From inside `src/`, the same `python` does find the folder named `scene`, because the current directory is on the import path. It then fails on the first Python 3 annotation (`west: float`). The package requires Python 3.12. Call it as `.venv/bin/python`, which is the interpreter the install used.
-
-Open http://127.0.0.1:8765. `SCENE_HOST` and `SCENE_PORT` change that address. The product command is `.venv/bin/python -m scene.serve`. `pnpm --dir frontend build` writes `frontend/dist`, and the Python process serves that page.
-
-The page is one canvas. The header has the radar mark and Open data on the left, and the selected scene in the center. A labeled tool column sits on the left, the selected scene fills the stage, and the chosen tool opens one pane on the right. The pane starts closed. The caption chooses the quicklook, thumbnail, or video. Measurement groups are disclosures and start collapsed. Each measurement has an icon, and a tool the scene cannot run shows a lock. Catalog and Library search and open scenes. The center facts line opens the rest of the fields on the picture. A download lists each file and its byte count along the bottom, and offers Open when that scene is not already on stage. Click the same tool, Close, or Escape to shut the pane.
-
-`.venv/bin/python -m scene.fetch` saves the Lisbon test scene under `data/scenes/<id>/`: the STAC record, the thumbnail, the quicklook, and the dwell video. `.venv/bin/python -m scene.fetch --all` also streams the GRD (about 484 MB), the colorized sub-aperture image (about 1.2 GB), the georeferenced dwell stack (about 827 MB), and the SLC (about 11 GB). The catalogue URL for that test scene lives in `src/scene/fetch.py`. A flat `data/stac.json` checkout is moved into the scene folder on startup, so files already on disk are not fetched again.
-
-The catalog tool searches the [ICEYE open data collection](https://iceye-open-data-catalog.s3.amazonaws.com/collections/iceye-sar.json). That bucket is a static STAC catalog, [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/), with no account. The commercial [ICAS catalog](https://docs.iceye.com/constellation/api/catalog/) is not called: it needs client credentials, and a download there is a purchase. The first search reads the collection link list. Item JSON (footprint, mode, thumbnail) fills in behind that list and is cached in `data/catalog-index.json` for 24 hours. The default download is the preview pack: thumbnail, quicklook, quicklook metadata, and the dwell video when the item has it, plus the STAC record. Large products stay unchecked until someone selects them. One download runs at a time.
-
-When `frontend/dist/index.html` is missing, `GET /` serves the original Python page: the quicklook, the STAC fields, and the person-written `content/scene_note.md`. When the build exists, choosing a scene shows its quicklook until an analysis picture replaces it.
-
-The measure control in the tool column is the analysis belt. Each tool reads rasters already on disk and draws a decibel picture with a legend. A tool the scene cannot support stays in the belt and names the missing file or the missing second look. Change and stack stay locked because the open catalog has no second look on this bridge. The older Lisbon-only job is still available as `POST /api/jobs/measure`.
-
-The same measurement from the shell, for the Lisbon test scene only:
+The Lisbon measurement from the shell requires the GRD and the dwell stack on disk:
 
 ```bash
 .venv/bin/python -m scene.analyze
 ```
 
-That requires the GRD and the dwell stack on disk. It writes:
+It writes `intelligence/measurements.json`, `intelligence/returns.geojson`, `intelligence/overview.png`, and `intelligence/briefing.md`. `overview.png` is gitignored.
 
-| File | Contents |
-| --- | --- |
-| `intelligence/measurements.json` | Water area, deck return, and bright returns |
-| `intelligence/returns.geojson` | The same returns as points, plus the deck line |
-| `intelligence/overview.png` | Water tint and deck line on the radar image |
-| `intelligence/briefing.md` | Prose from the measurement file |
+## Configuration
 
-`overview.png` is produced locally and is not stored in git. Set `OPENAI_API_KEY` in the environment or in a gitignored `.env` to let the model phrase `briefing.md` from `measurements.json` only.
+`OPENAI_API_KEY` is optional. Set it in the shell, or in a gitignored `.env` next to `docker-compose.yml`, before `docker compose up`. If it is missing, Start still measures. `SCENE_HOST` and `SCENE_PORT` change the address. The published port is 8765.
 
-## What the page may claim
-
-The quicklook, the STAC fields printed beside it, the measurement numbers, the overview, and the briefing. A row is a bright return, and the page has not named a ship. The fallback Python page also shows `content/scene_note.md`, which a person wrote.
-
-## What this repository does not do
-
-- No named vessel, no AIS, and no fusion with another sensor. A square in `intelligence/overview.png` is a bright radar return.
-- No claim that a model read the radar. `.venv/bin/python -m scene.analyze` calls a model only when `OPENAI_API_KEY` is set, and the prompt may only phrase `measurements.json`.
-- More than one open-data scene can be stored under `data/scenes/`. The bridge measurement runs only on the Lisbon test scene. Amplitude change compares two calibrated scenes of the same look and reports area that differs by at least 3 dB in a patch of at least 8 pixels. It does not name a flood or a vessel. No map library. The quicklook stays in the product's own pixel orientation. No ICAS purchase.
-- Python here is this reader, this job, and this page. It is not a large service other people depend on.
-- No Kubernetes. No air-gapped or classified deploy. Files already on disk and a local process are an offline view of the scenes downloaded here, nothing more.
-- The report uses LangChain to order tools and write the lead when a key is set, and a belt lead when it is not. The page does not ask a question.
-- No defense customer and no live track match. The scene is ICEYE open data.
-- GIS employment is not represented here. The note is a personal reading of one open scene.
-- Change and stack stay locked because the open catalog has no second look on this bridge. The drawn placeholder is used only when `demo/lisbon` is missing, and the page says those pictures were not measured from a raster.
+Effects are in the Configure table in [docs/application.md](docs/application.md).
 
 ## Tests
-
-Development checks need ruff and mypy:
 
 ```bash
 .venv/bin/pip install -r requirements-dev.txt
@@ -107,3 +59,7 @@ Development checks need ruff and mypy:
 pnpm --dir frontend typecheck
 pnpm --dir frontend test
 ```
+
+## Status
+
+Version 0.1.0. The scene and the catalogue are [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/). No code license is declared. How to work on the code is the Development section of [docs/application.md](docs/application.md).
