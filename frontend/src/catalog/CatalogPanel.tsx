@@ -10,15 +10,21 @@ import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { ScrollArea } from "@/components/ui/scroll-area"
+import { pairWarning } from "@/catalog/comparable"
 import {
   catalogSearchPath,
   EMPTY_FILTERS,
   type CatalogFilters,
 } from "@/catalog/search-query"
 import { catalogSummary, formatBytes } from "@/lib/format"
-import type { CatalogItemDetail, CatalogSearchResponse } from "@/types"
+import type {
+  CatalogItemDetail,
+  CatalogSearchResponse,
+  SceneResponse,
+} from "@/types"
 
 interface CatalogPanelProps {
+  scene: SceneResponse | null
   onOpenScene: (sceneId: string) => void
   onDownloadStarted: () => void
 }
@@ -28,6 +34,7 @@ interface CatalogPanelProps {
  * Thumbnails and footprints fill in as the server caches each item JSON.
  */
 export function CatalogPanel({
+  scene,
   onOpenScene,
   onDownloadStarted,
 }: CatalogPanelProps) {
@@ -126,6 +133,8 @@ export function CatalogPanel({
 
   const page = result ? Math.floor(result.offset / result.limit) + 1 : 1
   const pages = result ? Math.max(1, Math.ceil(result.total / result.limit)) : 1
+  // A sentence only. It does not uncheck the preview pack or block Download.
+  const pairNotice = detail ? pairWarning(scene, detail) : null
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
@@ -338,6 +347,11 @@ export function CatalogPanel({
           </ScrollArea>
           {downloadError ? (
             <p className="text-sm text-destructive">{downloadError}</p>
+          ) : null}
+          {pairNotice ? (
+            <p className="text-sm" role="status">
+              {pairNotice}
+            </p>
           ) : null}
           <div className="flex gap-2">
             <Button

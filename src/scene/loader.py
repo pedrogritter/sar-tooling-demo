@@ -71,6 +71,8 @@ class SceneRecord:
     band: str
     polarizations: tuple[str, ...]
     orbit_state: str
+    # Empty when the STAC item omits look side or stores a non-string.
+    look: str
     incidence_angle: float
     bbox: BoundingBox
     assets: tuple[Asset, ...]
@@ -132,6 +134,7 @@ def load_scene(stac_path: Path | None = None) -> SceneRecord:
         band=values["sar:frequency_band"],
         polarizations=_require_polarizations(properties.get("sar:polarizations"), path),
         orbit_state=values["sat:orbit_state"],
+        look=_optional_look(properties.get("sar:observation_direction")),
         incidence_angle=_require_number(
             properties.get("view:incidence_angle"),
             f"{path} properties.view:incidence_angle",
@@ -225,6 +228,17 @@ def _require_polarizations(raw: object, path: Path) -> tuple[str, ...]:
             f"{path} properties.sar:polarizations must be a non-empty list of strings"
         )
     return tuple(raw)
+
+
+def _optional_look(value: object) -> str:
+    """Look side is optional. A missing or non-string value stays empty.
+
+    It is not in the required-string set, so an older fixture still loads.
+    """
+
+    if isinstance(value, str):
+        return value
+    return ""
 
 
 def _require_text(value: object, label: str) -> str:

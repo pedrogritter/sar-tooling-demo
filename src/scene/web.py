@@ -309,6 +309,7 @@ def _scene_document(
         "band": scene.band,
         "polarizations": list(scene.polarizations),
         "orbit_state": scene.orbit_state,
+        "look": scene.look,
         "incidence_angle": scene.incidence_angle,
         "bbox": [bbox.west, bbox.south, bbox.east, bbox.north],
         "preview_url": preview_url,
