@@ -78,6 +78,7 @@ def make_state(quicklook: QuicklookImage | None = None) -> AppState:
         band="X",
         polarizations=("VV",),
         orbit_state="descending",
+        look="right",
         incidence_angle=32.5,
         bbox=BoundingBox(west=-9.2, south=38.6, east=-9.1, north=38.7),
         assets=(
@@ -291,6 +292,7 @@ class WebApiTest(unittest.TestCase):
                 dispatch("GET", "/api/scene", b"", make_state(quicklook), manager)
             )
             self.assertEqual(payload["scene_id"], "scene-1")
+            self.assertEqual(payload["look"], "right")
             self.assertEqual(payload["polarizations"], ["VV"])
             self.assertEqual(payload["bbox"], [-9.2, 38.6, -9.1, 38.7])
             self.assertEqual(payload["preview_url"], "/quicklook.png")

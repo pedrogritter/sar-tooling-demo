@@ -11,6 +11,7 @@ const SCENE: SceneResponse = {
   band: "X",
   polarizations: ["VV"],
   orbit_state: "ascending",
+  look: "right",
   incidence_angle: 26,
   bbox: [-16.9, 28, -16.6, 28.3],
   preview_url: "/api/scenes/ICEYE_TEST/quicklook.png",

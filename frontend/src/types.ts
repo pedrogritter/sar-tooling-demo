@@ -54,6 +54,7 @@ export interface SceneResponse {
   band: string
   polarizations: string[]
   orbit_state: string
+  look: string
   incidence_angle: number
   bbox: BoundingBox
   preview_url: string | null

@@ -21,6 +21,7 @@ class RealSceneTest(unittest.TestCase):
         self.assertEqual(scene.band, "X")
         self.assertEqual(scene.polarizations, ("VV",))
         self.assertEqual(scene.orbit_state, "descending")
+        self.assertEqual(scene.look, "right")
         self.assertAlmostEqual(scene.incidence_angle, 32.035387, places=3)
         self.assertLess(scene.bbox.west, -9.2)
         self.assertGreater(scene.bbox.north, 38.7)
@@ -68,6 +69,25 @@ class FixtureSceneTest(unittest.TestCase):
             assert quicklook is not None
             self.assertIsNone(quicklook.local_path)
             self.assertEqual(quicklook.href, "https://example.test/quicklook.tif")
+            self.assertEqual(scene.look, "")
+
+    def test_look_side_is_kept_and_a_non_string_stays_empty(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            path = Path(raw) / "stac.json"
+            kept = _item()
+            properties = kept["properties"]
+            assert isinstance(properties, dict)
+            properties["sar:observation_direction"] = "right"
+            path.write_text(json.dumps(kept), encoding="utf-8")
+            self.assertEqual(load_scene(path).look, "right")
+
+            properties["sar:observation_direction"] = 4
+            path.write_text(json.dumps(kept), encoding="utf-8")
+            self.assertEqual(load_scene(path).look, "")
+
+            properties["sar:observation_direction"] = None
+            path.write_text(json.dumps(kept), encoding="utf-8")
+            self.assertEqual(load_scene(path).look, "")
 
     def test_missing_file_names_scene_py(self) -> None:
         with self.assertRaises(SceneDataError) as caught:

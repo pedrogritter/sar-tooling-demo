@@ -434,6 +434,7 @@ export function ScenePage() {
             ) : null}
             {tool === "catalog" ? (
               <CatalogPanel
+                scene={scene}
                 onOpenScene={openSceneOnStage}
                 onDownloadStarted={() => {
                   setDockExpanded(true)
