@@ -84,6 +84,23 @@ describe("stage", () => {
     expect(stage.src).toBe(SCENE.preview_url)
   })
 
+  it("plays the scene video url with a Video label", () => {
+    const scene: SceneResponse = {
+      ...SCENE,
+      video_url: "/api/scenes/ICEYE_TEST/video",
+    }
+    const stage = stageFor("preview", "video", scene, false, {
+      measurement: null,
+      briefing_html: null,
+      overview_url: "/api/scenes/ICEYE_TEST/analysis/dwell-motion/overview.png",
+    })
+    expect(stage.media).toBe("video")
+    expect(stage.src).toBe(scene.video_url)
+    expect(stage.label).toBe("Video · 11 Feb 2026, 00:00:00 UTC")
+    expect(stage.src).not.toContain("overview")
+    expect(stage.src).not.toContain("vid-cog")
+  })
+
   it("keeps a locked tool from running", () => {
     expect(analysisRunDisabled(null)).toBe(true)
     expect(analysisRunDisabled({ locked: true })).toBe(true)

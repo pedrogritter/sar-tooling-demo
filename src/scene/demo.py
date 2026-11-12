@@ -1,12 +1,16 @@
-"""Placeholder Lisbon scene for an empty data directory.
+"""Lisbon scene for an empty data directory.
 
-The pictures and numbers are drawn in this process. They are not an ICEYE
-raster and they are not a measurement. ``seed_if_needed`` copies them when
-the Lisbon scene folder is missing or empty. A folder that already holds
-files is left alone, even when ``stac.json`` is missing. Clearing the demo
-leaves ``stac.json``, so the next start does not put the pictures back. If
-that record is then removed and the folder is empty, the following start
-seeds again. A real download removes the placeholder only after it finishes.
+``demo/lisbon`` is the committed source. When that tree holds ``stac.json``
+and ``preview.png``, and no radar raster, ``write_seed`` copies it into
+``demo/seed``. It does not draw the gray frame and it does not write
+``demo.json``. When that tree is missing, the pictures and numbers are drawn
+in this process. They are not an ICEYE raster and they are not a measurement.
+``seed_if_needed`` copies the seed when the Lisbon scene folder is missing
+or empty. A folder that already holds files is left alone, even when
+``stac.json`` is missing. Clearing the demo leaves ``stac.json``, so the next
+start does not put the pictures back. If that record is then removed and the
+folder is empty, the following start seeds again. A real download removes
+the placeholder only after it finishes.
 """
 
 from __future__ import annotations
@@ -26,6 +30,17 @@ PLACEHOLDER_NOTE = (
 )
 SEED_MARKER = ".seed-applied"
 DEMO_FILE = "demo.json"
+
+# Radar products. A committed seed that contains one of these is refused.
+_RASTER_NAMES = frozenset(
+    {
+        "grd-cog.tif",
+        "slc-cog.tif",
+        "csi-cog.tif",
+        "vid-cog.tif",
+        "qlk-cog.tif",
+    }
+)
 
 # Single-scene tools. Motion, change, and stack stay locked with no picture.
 _TOOLS: tuple[tuple[str, str, tuple[tuple[str, str], ...]], ...] = (
@@ -77,6 +92,10 @@ _TOOLS: tuple[tuple[str, str, tuple[tuple[str, str], ...]], ...] = (
 
 class PlaceholderMissing(Exception):
     """Clear was asked for, and no scene folder is marked as a placeholder."""
+
+
+class SeedRasterError(Exception):
+    """The Lisbon seed source contains a radar raster, which must not be copied."""
 
 
 def note_from_folder(folder: Path) -> str | None:
@@ -188,8 +207,76 @@ def strip_placeholder(
     return True
 
 
-def write_seed(dest: Path) -> Path:
-    """Write the small placeholder tree. No radar product is read or stored."""
+def preview_file(folder: Path) -> Path | None:
+    """``preview.png`` beside the scene record, when the seed stores one.
+
+    This is the rendered quicklook, not ``qlk-cog.tif``. The library uses it
+    so a scene with no raster still has a quicklook URL.
+    """
+
+    path = folder / "preview.png"
+    if path.is_file():
+        return path
+    return None
+
+
+def write_seed(dest: Path, source: Path | None = None) -> Path:
+    """Copy the committed Lisbon tree, or draw the placeholder when it is absent.
+
+    ``source`` defaults to ``demo/lisbon``. The copy runs only when that tree
+    contains ``stac.json`` and ``preview.png``. It does not draw the gray
+    frame and it does not write ``demo.json``. A radar COG in the source
+    raises ``SeedRasterError`` so the raster never enters ``demo/seed``.
+    """
+
+    origin = project_root() / "demo" / "lisbon" if source is None else source
+    raster = _raster_name(origin)
+    if raster is not None:
+        raise SeedRasterError(
+            f"Lisbon seed must not contain a radar raster ({raster})"
+        )
+    scene = _committed_scene(origin)
+    if scene is None:
+        return _write_placeholder(dest)
+    return _copy_committed(dest, scene)
+
+
+def _committed_scene(origin: Path) -> Path | None:
+    """Scene folder when it holds both ``stac.json`` and ``preview.png``."""
+
+    nested = origin / "scenes" / LISBON_SCENE_ID
+    for folder in (nested, origin):
+        if (folder / "stac.json").is_file() and preview_file(folder) is not None:
+            return folder
+    return None
+
+
+def _raster_name(origin: Path) -> str | None:
+    """First forbidden radar filename under ``origin``, if one is present."""
+
+    if not origin.exists():
+        return None
+    if origin.is_file():
+        return origin.name if origin.name in _RASTER_NAMES else None
+    for path in origin.rglob("*"):
+        if path.is_file() and path.name in _RASTER_NAMES:
+            return path.name
+    return None
+
+
+def _copy_committed(dest: Path, scene: Path) -> Path:
+    """Copy one scene folder. ``demo.json`` marks a drawing and stays out."""
+
+    folder = dest / "scenes" / LISBON_SCENE_ID
+    if folder.exists():
+        shutil.rmtree(folder)
+    folder.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copytree(scene, folder, ignore=shutil.ignore_patterns(DEMO_FILE))
+    return dest
+
+
+def _write_placeholder(dest: Path) -> Path:
+    """Write the small drawn tree. No radar product is read or stored."""
 
     folder = dest / "scenes" / LISBON_SCENE_ID
     if folder.exists():

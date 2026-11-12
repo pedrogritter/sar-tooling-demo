@@ -272,7 +272,7 @@ export function ScenePage() {
     },
     {
       id: "video",
-      label: "Dwell video",
+      label: "Video",
       enabled: Boolean(scene?.video_url),
     },
   ]

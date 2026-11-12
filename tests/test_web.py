@@ -11,7 +11,10 @@ import urllib.error
 import urllib.request
 from http.server import ThreadingHTTPServer
 from pathlib import Path
+from typing import Any
 from unittest.mock import patch
+
+from PIL import Image
 
 from scene.jobs import MeasurementJobManager
 from scene.web import AppState, build_state, dispatch, make_handler
@@ -237,6 +240,226 @@ class ServerTest(unittest.TestCase):
             server.shutdown()
             thread.join(timeout=5)
             server.server_close()
+
+
+class PreviewVideoRouteTest(unittest.TestCase):
+    """The quicklook and the video control, using a few dozen fixture bytes."""
+
+    state: AppState
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls.state = build_state()
+
+    def test_quicklook_returns_preview_png_when_the_cog_is_absent(self) -> None:
+        preview = b"preview-bytes-unchanged"
+        with tempfile.TemporaryDirectory() as raw:
+            root = Path(raw)
+            scene_id = "ICEYE_PREVIEW_20251024T135309Z_1_X52_SLF"
+            _write_collect(
+                root,
+                scene_id,
+                {"graphic": _asset("https://example.invalid/graphic.png", "image/png")},
+                {"preview.png": preview},
+            )
+            with patch("scene.web.scene_dir", _rooted(root)):
+                response = dispatch(
+                    "GET",
+                    f"/api/scenes/{scene_id}/quicklook.png",
+                    b"",
+                    self.state,
+                )
+        self.assertEqual(response.status, 200)
+        self.assertEqual(response.content_type, "image/png")
+        self.assertEqual(response.body, preview)
+
+    def test_quicklook_cog_still_wins_over_preview_png(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            root = Path(raw)
+            scene_id = "ICEYE_PREVIEW_20251024T135309Z_1_X52_SLF"
+            folder = _write_collect(
+                root,
+                scene_id,
+                {
+                    "qlk-cog": _asset(
+                        "https://example.invalid/qlk-cog.tif", "image/tiff"
+                    )
+                },
+                {"preview.png": b"preview-not-this"},
+            )
+            Image.new("L", (4, 4), color=90).save(folder / "qlk-cog.tif", format="TIFF")
+            with patch("scene.web.scene_dir", _rooted(root)):
+                response = dispatch(
+                    "GET",
+                    f"/api/scenes/{scene_id}/quicklook.png",
+                    b"",
+                    self.state,
+                )
+        self.assertEqual(response.status, 200)
+        self.assertEqual(response.content_type, "image/png")
+        self.assertTrue(response.body.startswith(b"\x89PNG\r\n\x1a\n"))
+        self.assertNotEqual(response.body, b"preview-not-this")
+
+    def test_video_route_returns_the_mp4_not_the_dwell_stack(self) -> None:
+        mp4 = b"mp4-fixture-bytes-0123456789-ABCDEFG"
+        cog = b"vid-cog-must-not-be-served-0000"
+        with tempfile.TemporaryDirectory() as raw:
+            root = Path(raw)
+            scene_id = "ICEYE_VIDEO_20251024T135309Z_1_X52_SLF"
+            _write_collect(
+                root,
+                scene_id,
+                {
+                    "vid-mp4": _asset(
+                        "https://example.invalid/vid-mp4.mp4", "video/mp4"
+                    ),
+                    "vid-cog": _asset(
+                        "https://example.invalid/vid-cog.tif", "image/tiff"
+                    ),
+                },
+                {"vid-mp4.mp4": mp4, "vid-cog.tif": cog},
+            )
+            with (
+                patch("scene.web.scene_dir", _rooted(root)),
+                _refuse_dwell_stack(),
+            ):
+                response = dispatch(
+                    "GET", f"/api/scenes/{scene_id}/video", b"", self.state
+                )
+        self.assertEqual(response.status, 200)
+        self.assertEqual(response.content_type, "video/mp4")
+        self.assertEqual(response.body, mp4)
+        self.assertIn(("Accept-Ranges", "bytes"), response.headers)
+        self.assertNotIn(cog, response.body)
+
+    def test_video_route_honors_a_byte_range(self) -> None:
+        mp4 = b"mp4-fixture-bytes-0123456789-ABCDEFG"
+        cog = b"vid-cog-must-not-be-served-0000"
+        with tempfile.TemporaryDirectory() as raw:
+            root = Path(raw)
+            scene_id = "ICEYE_VIDEO_20251024T135309Z_1_X52_SLF"
+            _write_collect(
+                root,
+                scene_id,
+                {
+                    "vid-mp4": _asset(
+                        "https://example.invalid/vid-mp4.mp4", "video/mp4"
+                    ),
+                    "vid-cog": _asset(
+                        "https://example.invalid/vid-cog.tif", "image/tiff"
+                    ),
+                },
+                {"vid-mp4.mp4": mp4, "vid-cog.tif": cog},
+            )
+            server = ThreadingHTTPServer(("127.0.0.1", 0), make_handler(self.state))
+            thread = threading.Thread(target=server.serve_forever, daemon=True)
+            thread.start()
+            port = server.server_address[1]
+            url = f"http://127.0.0.1:{port}/api/scenes/{scene_id}/video"
+            try:
+                with (
+                    patch("scene.web.scene_dir", _rooted(root)),
+                    _refuse_dwell_stack(),
+                ):
+                    request = urllib.request.Request(
+                        url, headers={"Range": "bytes=0-3"}
+                    )
+                    with urllib.request.urlopen(request, timeout=5) as response:
+                        body = response.read()
+                        status = response.status
+                        content_range = response.headers["Content-Range"]
+                        accept = response.headers["Accept-Ranges"]
+                        content_type = response.headers["Content-Type"]
+                    head = urllib.request.Request(
+                        url, headers={"Range": "bytes=0-3"}, method="HEAD"
+                    )
+                    with urllib.request.urlopen(head, timeout=5) as response:
+                        head_status = response.status
+                        head_range = response.headers["Content-Range"]
+                        head_length = response.headers["Content-Length"]
+                        head_body = response.read()
+                    past = urllib.request.Request(
+                        url, headers={"Range": f"bytes={len(mp4)}-{len(mp4) + 3}"}
+                    )
+                    with self.assertRaises(urllib.error.HTTPError) as caught:
+                        urllib.request.urlopen(past, timeout=5)
+            finally:
+                server.shutdown()
+                thread.join(timeout=5)
+                server.server_close()
+        self.assertEqual(status, 206)
+        self.assertEqual(body, mp4[:4])
+        self.assertEqual(content_type, "video/mp4")
+        self.assertEqual(content_range, f"bytes 0-3/{len(mp4)}")
+        self.assertEqual(accept, "bytes")
+        self.assertNotIn(cog, body)
+        self.assertEqual(head_status, 206)
+        self.assertEqual(head_range, f"bytes 0-3/{len(mp4)}")
+        self.assertEqual(head_length, "4")
+        self.assertEqual(head_body, b"")
+        self.assertEqual(caught.exception.code, 416)
+        self.assertEqual(
+            caught.exception.headers["Content-Range"], f"bytes */{len(mp4)}"
+        )
+
+
+def _write_collect(
+    root: Path,
+    scene_id: str,
+    assets: dict[str, dict[str, str]],
+    files: dict[str, bytes],
+) -> Path:
+    folder = root / "scenes" / scene_id
+    folder.mkdir(parents=True)
+    payload = {
+        "id": scene_id,
+        "bbox": [-9.214, 38.66, -9.14, 38.718],
+        "properties": {
+            "datetime": "2025-10-24T13:53:16.995Z",
+            "start_datetime": "2025-10-24T13:53:09.803Z",
+            "end_datetime": "2025-10-24T13:53:24.188Z",
+            "platform": "ICEYE-X52",
+            "sar:instrument_mode": "spotlight",
+            "sar:frequency_band": "X",
+            "sar:polarizations": ["VV"],
+            "sat:orbit_state": "descending",
+            "view:incidence_angle": 32.0,
+        },
+        "assets": assets,
+    }
+    (folder / "stac.json").write_text(json.dumps(payload), encoding="utf-8")
+    for name, payload_bytes in files.items():
+        (folder / name).write_bytes(payload_bytes)
+    return folder
+
+
+def _asset(href: str, media_type: str) -> dict[str, str]:
+    return {"href": href, "type": media_type, "title": href.rsplit("/", 1)[-1]}
+
+
+class _RefuseDwellStack:
+    """Fails the test when the video route opens ``vid-cog.tif``."""
+
+    def __init__(self) -> None:
+        self._patch: Any = None
+
+    def __enter__(self) -> None:
+        original = Path.open
+
+        def guard(self: Path, *args: Any, **kwargs: Any) -> Any:
+            if self.name == "vid-cog.tif":
+                raise AssertionError("video route opened vid-cog.tif")
+            return original(self, *args, **kwargs)
+
+        self._patch = patch.object(Path, "open", guard)
+        self._patch.start()
+
+    def __exit__(self, *_exc: object) -> None:
+        self._patch.stop()
+
+
+def _refuse_dwell_stack() -> _RefuseDwellStack:
+    return _RefuseDwellStack()
 
 
 if __name__ == "__main__":
