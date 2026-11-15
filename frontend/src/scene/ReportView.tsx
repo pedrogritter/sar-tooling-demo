@@ -417,7 +417,7 @@ export function ReportView({ sceneId, onClose }: ReportViewProps) {
   )
 }
 
-/** One finished measurement: the picture, the summary rows, and the limit. */
+/** One finished measurement: picture, summary, prose, and the limit. */
 function FigureCard({ figure }: { figure: FigureView }) {
   return (
     <article
@@ -450,6 +450,9 @@ function FigureCard({ figure }: { figure: FigureView }) {
             </div>
           ))}
         </dl>
+      ) : null}
+      {figure.prose.trim() ? (
+        <Briefing text={figure.prose} failed={false} />
       ) : null}
       {figure.limit ? (
         <p className="text-xs text-muted-foreground">{figure.limit}</p>

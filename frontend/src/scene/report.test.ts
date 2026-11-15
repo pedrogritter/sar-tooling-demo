@@ -28,6 +28,7 @@ function section(overrides: Partial<ReportSection> = {}): ReportSection {
     },
     briefing_md: "Section text.",
     briefing_source: "model",
+    reading_md: "",
     overview_url: "/overview.png",
     partner_id: null,
     progress_note: "",
@@ -114,6 +115,28 @@ describe("normalizeReport", () => {
     expect(saved.synthesis_md).toBe("")
     expect(saved.synthesis_source).toBe("belt")
     expect(saved.sections[0]?.progress_note).toBe("")
+    expect(saved.sections[0]?.reading_md).toBe("")
+    expect(saved.sections[0]?.briefing_md).toBe("Belt text.")
+  })
+
+  it("keeps a reading and leaves the belt briefing unchanged", () => {
+    const saved = normalizeReport({
+      scene_id: "S",
+      sections: [
+        {
+          tool_id: "open-water",
+          status: "done",
+          measurement: null,
+          briefing_md: "Belt text.",
+          briefing_source: "belt",
+          reading_md: "A reading of the dark water.",
+        },
+      ],
+    })
+
+    expect(saved.sections[0]?.reading_md).toBe("A reading of the dark water.")
+    expect(saved.sections[0]?.briefing_md).toBe("Belt text.")
+    expect(saved.sections[0]?.briefing_source).toBe("belt")
   })
 
   it("treats an empty older file as a finished report with nothing to show", () => {
@@ -340,8 +363,41 @@ describe("figureViews", () => {
       limit: "Not a building height.",
       partnerId: "ICEYE_B",
     })
+    expect(figures[1]).toMatchObject({
+      prose: "A model essay that is not the figure.",
+    })
     expect(JSON.stringify(figures)).not.toContain("A joke")
-    expect(JSON.stringify(figures)).not.toContain("model essay")
+  })
+
+  it("uses the reading when it has text and the belt briefing otherwise", () => {
+    const figures = figureViews(
+      report({
+        tool_order: ["open-water", "built-up"],
+        sections: [
+          section({
+            tool_id: "open-water",
+            reading_md: "A reading of the dark water.",
+            briefing_md: "Belt text for the water.",
+          }),
+          section({
+            tool_id: "built-up",
+            reading_md: "   ",
+            briefing_md: "Belt text for the clusters.",
+          }),
+        ],
+      })
+    )
+
+    expect(figures.map((figure) => [figure.toolId, figure.prose])).toEqual([
+      ["open-water", "A reading of the dark water."],
+      ["built-up", "Belt text for the clusters."],
+    ])
+    expect(figures[0]?.limit).toBe(
+      "A bright return stays a bright radar return."
+    )
+    expect(figures[0]?.summary).toEqual([
+      { label: "Water area", value: "1 km²" },
+    ])
   })
 })
 
