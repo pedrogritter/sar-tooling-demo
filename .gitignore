@@ -26,3 +26,6 @@ HANDOFF.md
 .cursorignore
 .superpowers/
 docs/superpowers/
+
+# Linked worktrees stay on this machine.
+.worktrees/
