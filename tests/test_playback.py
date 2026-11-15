@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import json
+import shutil
+import subprocess
 import tempfile
 import threading
 import unittest
@@ -138,6 +140,37 @@ class PlayableMp4Test(unittest.TestCase):
             self.assertEqual(len(results), 2)
             self.assertEqual(results[0].read_bytes(), b"AVC-PLAYABLE")
             self.assertEqual(results[1], results[0])
+
+    def test_ffmpeg_writes_h264_with_the_moov_first(self) -> None:
+        if shutil.which("ffmpeg") is None:
+            self.skipTest("ffmpeg is not installed")
+        with tempfile.TemporaryDirectory() as raw:
+            folder = Path(raw)
+            source = folder / "vid-mp4.mp4"
+            made = subprocess.run(
+                [
+                    "ffmpeg",
+                    "-y",
+                    "-f",
+                    "lavfi",
+                    "-i",
+                    "testsrc=size=64x64:rate=5:duration=1",
+                    "-c:v",
+                    "mpeg4",
+                    str(source),
+                ],
+                capture_output=True,
+                check=False,
+            )
+            detail = made.stderr.decode("utf-8", "replace")
+            self.assertEqual(made.returncode, 0, detail)
+            original = source.read_bytes()
+            playable = playable_mp4(source)
+            data = playable.read_bytes()
+            self.assertNotEqual(playable, source)
+            self.assertIn(b"avc1", data)
+            self.assertLess(data.find(b"moov"), data.find(b"mdat"))
+            self.assertEqual(source.read_bytes(), original)
 
 
 class VideoRouteTest(unittest.TestCase):

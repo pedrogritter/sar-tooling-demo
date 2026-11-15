@@ -68,7 +68,8 @@ def ffmpeg_transcode(source: Path, dest: Path) -> None:
     if shutil.which("ffmpeg") is None:
         raise PlaybackError(FAILURE)
     dest.parent.mkdir(parents=True, exist_ok=True)
-    temporary = dest.with_name(dest.name + ".part")
+    # The part file has to end in .mp4. ffmpeg refuses a trailing .part.
+    temporary = dest.with_suffix(".part.mp4")
     command = [
         "ffmpeg",
         "-y",
