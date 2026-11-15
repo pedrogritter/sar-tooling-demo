@@ -57,6 +57,7 @@ Startup loads the Lisbon STAC item, the scene note, the fallback static files, a
 | `src/scene/` | Python package. Load a STAC item, search the catalogue, download assets, measure rasters, serve the page. |
 | `src/scene/belt/` | Analysis tools. Each tool reads a coarse overview and writes a picture, a measurement, and a short briefing. |
 | `src/scene/report/` | The scene report. The code chooses the tools. LangChain orders them and writes the lead when a key is set, and a belt lead is stored when it is not. A key writes a short humorous progress note. Without a key the note is a plain sentence. It saves `report/report.json` and a WeasyPrint PDF. The page does not ask a question. |
+| `src/scene/guide.py` | The usage guide. Quotes the belt limits, the glossary, and the scene note. No model call. |
 | `src/scene/grid.py` | Affine from full-resolution pixels to longitude and latitude (`proj:transform`). |
 | `src/scene/quicklook.py` | Turns `qlk-cog.tif` into the grayscale PNG the browser shows. |
 | `src/scene/page.py` | Fallback HTML. No question box. |
@@ -66,8 +67,8 @@ Startup loads the Lisbon STAC item, the scene note, the fallback static files, a
 | `frontend/` | Vite and React. `pnpm --dir frontend build` writes `frontend/dist`. Node is 26.13.0. |
 | `demo/build_seed.py` | Copies `demo/lisbon` into `demo/seed`, or draws the placeholder when that tree is missing. The image runs it. `demo/seed/` is generated and gitignored. `demo/lisbon/` is the committed preview, thumbnail, dwell video, analysis, and report. |
 | `Dockerfile`, `docker-compose.yml` | One service. The volume is `/app/data`. |
-| `content/scene_note.md` | Person-written note. Source text for the fallback page only. |
-| `content/sar_glossary.md` | The only extra wording the report lead may use. Belt limit sentences, and the terms already used for these tools. |
+| `content/scene_note.md` | Person-written note. The fallback page shows it. The usage guide may quote it. |
+| `content/sar_glossary.md` | The only extra wording the report lead may use. Belt limit sentences, and the terms already used for these tools. The usage guide quotes the same lines. |
 | `data/` | Gitignored. `data/scenes/<id>/` holds one downloaded item. `data/catalog-index.json` is the search cache. |
 | `intelligence/` | Output of the Lisbon-only measurement. `overview.png` is gitignored. |
 | `tests/` | Python tests (`unittest`). |
@@ -122,6 +123,7 @@ The server is `ThreadingHTTPServer` from the standard library. It binds `127.0.0
 | `POST /api/scenes/<id>/report/run` | Start the report. Body: `partner_id` null, or one scene id. The code chooses the tools. 400 when `partner_id` is missing or not a scene id (`partner_id must be null or one scene id`), when the partner is not eligible (`partner_id is not a scene this report can compare.`), or when nothing can run (`No tool can run for this scene.`). A missing key still starts the job. A second measurement returns 409 with `{"status": "running"}`. |
 | `GET /api/scenes/<id>/report` | The saved report, partial while a job runs. Fields: `question` (empty for a new run), `partner_id`, `phase` (`planning`, `running`, `writing`, `done`), `tool_order`, `synthesis_md`, `synthesis_source` (`model` or `belt`), and `sections`. Each section has `progress_note`. An empty `sections` list when none was saved. |
 | `GET /api/scenes/<id>/report.pdf` | The saved report as a WeasyPrint PDF. 404 when none was saved. 500 with `The report PDF could not be written.` when the writer fails. The route does not call the model. |
+| `GET /api/guide` | The usage guide. Body: `sections`. Each section has `id`, `title`, and `paragraphs`. The route does not call a model and does not read a raster. |
 | `GET /api/report/key` | Whether this process has an OpenAI key. Body: `configured` and `source` (`unset`, `environment`, or `session`). The key is not returned. |
 | `POST /api/report/key` | Keep a key for this process only. Body: `api_key`. Nothing is written to disk. 409 when a key already arrived from the environment. 400 when the key is empty, contains spaces, or is longer than 512 characters. The response is the same status object as the GET, and it does not echo the key. |
 | `POST /api/jobs/run` | Start one belt tool. Body: `scene_id`, `tool_id`, optional `partner_id`. |
@@ -145,7 +147,7 @@ Hashed files under `frontend/dist` are cached for a year. `index.html` is `no-st
 
 ### Frontend
 
-`frontend/src/App.tsx` renders one `ScenePage`. The shell is a header, a tool column, a stage, one right-hand pane, and a download dock along the bottom. The header puts the radar mark and the name Open data on the left. The center is labeled Selected scene: "25 de Abril bridge" for the test scene and the scene id otherwise, then the collected time, platform, mode, band, and polarization. That facts line opens the metadata card. The card starts closed. The tool column lists Scene (Preview, Catalog, Library, Report), then the measurement groups. A group is a disclosure with a chevron, not a tool. Groups stay collapsed until opened, and the group that holds the selected tool stays open. Each measurement has its own icon. A locked tool stays clickable and shows a lock; the pane still names the missing file. The pane starts closed. On a narrow viewport the column scrolls sideways and the pane stacks under the stage. Choosing the open tool, Close, or Escape shuts the pane. Escape is ignored while focus is in a field. Opening a scene from the catalog or the library closes the pane. A Settings button beside the theme control opens a modal. The modal sets an OpenAI key for this process through `POST /api/report/key`. The key is not written to disk and is not echoed. A key that arrived from the environment keeps the field hidden. Restarting the process clears a key entered in the modal. Host, port, and catalogue URLs stay out of the modal. Escape closes the tool pane only when that modal is closed and focus is not in a field.
+`frontend/src/App.tsx` renders one `ScenePage`. The shell is a header, a tool column, a stage, one right-hand pane, and a download dock along the bottom. The header puts the radar mark and the name Open data on the left. The center is labeled Selected scene: "25 de Abril bridge" for the test scene and the scene id otherwise, then the collected time, platform, mode, band, and polarization. That facts line opens the metadata card. The card starts closed. The tool column lists Scene (Preview, Catalog, Library, Report, Documentation), then the measurement groups. Choosing Documentation replaces the stage with the usage guide. Close and Escape return to the picture. A group is a disclosure with a chevron, not a tool. Groups stay collapsed until opened, and the group that holds the selected tool stays open. Each measurement has its own icon. A locked tool stays clickable and shows a lock; the pane still names the missing file. The pane starts closed. On a narrow viewport the column scrolls sideways and the pane stacks under the stage. Choosing the open tool, Close, or Escape shuts the pane. Escape is ignored while focus is in a field. Opening a scene from the catalog or the library closes the pane. A Settings button beside the theme control opens a modal. The modal sets an OpenAI key for this process through `POST /api/report/key`. The key is not written to disk and is not echoed. A key that arrived from the environment keeps the field hidden. Restarting the process clears a key entered in the modal. Host, port, and catalogue URLs stay out of the modal. Escape closes the tool pane only when that modal is closed and focus is not in a field.
 
 The stage shows the quicklook, thumbnail, or dwell video. A belt picture replaces that preview only when the selected tool produced it and the URL contains `/analysis/<that-tool>/`. The Lisbon `/overview.png` is not that picture.
 
@@ -258,6 +260,14 @@ The model is `gpt-4o-mini`. None of the four calls receives a raster, a quickloo
 
 **PDF.** `src/scene/report/pdf.py` renders one HTML document: inline CSS, A4, a page header, page numbers, a page break before each tool, and local `overview.png` paths. A done section shows `reading_md` when it has text, otherwise the belt briefing, and the summary rows and limit stay. The PDF route does not call the model. WeasyPrint writes the bytes. `fpdf2` is not a dependency. The image installs Pango, Cairo, GDK-Pixbuf, and a Liberation font. The tests build the HTML and mock the writer, so the suite does not need those libraries. A machine that generates a real PDF needs the same packages. A PDF that cannot be built is a 500 with `The report PDF could not be written.` The exception text goes to the server log only. A finished report job has `result: null` in `GET /api/jobs/current`, so belt panes never read it as tool output. The page loads the report after every start, even when the first job read is already done or failed.
 
+### Usage guide
+
+Documentation is a Scene-column tool, for a reader who is not a radar analyst. Choosing it replaces the stage, the same way Report does. Close and Escape return to the picture. The view loads `GET /api/guide` and renders each section's title and paragraphs. A contents list jumps to a section. While the guide is loading the line is "Opening the usage guide." If the guide cannot be read the line is "The usage guide could not be read."
+
+`GET /api/guide` returns `sections`. Each section has `id`, `title`, and `paragraphs`. The route does not call a model and does not read a raster. The text explains what the page does, how to search, download, and open a scene, and how to run a tool and a report. Science sections quote `content/sar_glossary.md` for sigma-nought, incidence, look side, speckle, layover, and a bright return. Each belt tool has a section with what the measurement does, the file it reads, and that tool's limit sentence. Retrieval and Kubernetes are later sections, and both say they are not running.
+
+The guide may quote STAC fields, the glossary, the scene note, and tool limit sentences. It does not name a ship, match AIS, or say that a model inspected a raster. A bright mark stays a bright radar return. This view does not run a tool and does not download a scene.
+
 ### Fallback page and the Lisbon briefing
 
 With no `frontend/dist/index.html`, `GET /` renders the Python page from `scene.page`. That page shows the quicklook, the STAC fields, which assets are on disk, and `content/scene_note.md`. It states that no detector has run. It has no question box.
@@ -347,7 +357,7 @@ A model in any of the items below may phrase measurements, STAC fields, the scen
 
 ### Usage guide
 
-- [ ] Add a Documentation section to the React page, for a reader who is not a radar analyst. It explains what the application does, how to search, download, and open a scene, and how to run a tool and a report. It explains the science the page is allowed to state: sigma-nought, incidence, look side, speckle, layover, and a bright return. Each belt tool gets a section that says what the measurement does, which file it reads, and the limit sentence it already carries. Later sections may describe retrieval and a Kubernetes layout as sketches that are not running. The guide may quote STAC fields, `content/sar_glossary.md`, `content/scene_note.md`, and tool limit sentences. It may not name a ship, match AIS, or say that a model inspected a raster.
+- [x] Add a Documentation section to the React page, for a reader who is not a radar analyst. It explains what the application does, how to search, download, and open a scene, and how to run a tool and a report. It explains the science the page is allowed to state, and each belt tool's file and limit sentence. Retrieval and a Kubernetes layout are described as sketches that are not running. See Usage guide above.
 
 ### Report section readings
 
