@@ -43,6 +43,7 @@ from .downloads import (
     DownloadManager,
     default_downloads,
 )
+from .guide import guide_payload
 from .jobs import (
     JobAlreadyRunningError,
     MeasurementJobManager,
@@ -359,6 +360,8 @@ def _dispatch_workspace(
     path = urlsplit(target).path
     if path == "/api/library" and method == "GET":
         return _json(200, {"scenes": list_library()})
+    if path == "/api/guide" and method == "GET":
+        return _json(200, guide_payload())
     if path == "/api/demo/clear" and method == "POST":
         return _clear_demo(body)
     if path == "/api/jobs/run" and method == "POST":
