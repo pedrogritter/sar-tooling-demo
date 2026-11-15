@@ -9,11 +9,14 @@ from __future__ import annotations
 import logging
 import shutil
 import subprocess
+import threading
 from pathlib import Path
 
 LOGGER = logging.getLogger("scene")
 FAILURE = "The dwell video could not be prepared for playback."
 _CONTAINERS = frozenset({b"moov", b"trak", b"mdia", b"minf", b"stbl"})
+_GUARD = threading.Lock()
+_LOCKS: dict[str, threading.Lock] = {}
 
 
 class PlaybackError(RuntimeError):
@@ -44,14 +47,18 @@ def playable_mp4(source: Path) -> Path:
         return cache
     if sample_entry(source) != "mp4v":
         return source
-    try:
-        ffmpeg_transcode(source, cache)
-    except PlaybackError:
-        raise
-    except OSError as exc:
-        raise PlaybackError(FAILURE) from exc
-    if not cache.is_file():
-        raise PlaybackError(FAILURE)
+    # Chromium opens more than one fetch while the first transcode runs.
+    with _lock_for(source):
+        if _fresh(cache, source):
+            return cache
+        try:
+            ffmpeg_transcode(source, cache)
+        except PlaybackError:
+            raise
+        except OSError as exc:
+            raise PlaybackError(FAILURE) from exc
+        if not cache.is_file():
+            raise PlaybackError(FAILURE)
     return cache
 
 
@@ -83,6 +90,16 @@ def ffmpeg_transcode(source: Path, dest: Path) -> None:
         LOGGER.error("dwell video transcode failed: %s", detail)
         raise PlaybackError(FAILURE)
     temporary.replace(dest)
+
+
+def _lock_for(source: Path) -> threading.Lock:
+    key = str(source.resolve())
+    with _GUARD:
+        lock = _LOCKS.get(key)
+        if lock is None:
+            lock = threading.Lock()
+            _LOCKS[key] = lock
+        return lock
 
 
 def _fresh(cache: Path, source: Path) -> bool:

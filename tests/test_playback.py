@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import tempfile
+import threading
 import unittest
 from pathlib import Path
 from unittest.mock import patch
@@ -103,6 +104,40 @@ class PlayableMp4Test(unittest.TestCase):
                 with self.assertRaises(PlaybackError) as caught:
                     playable_mp4(source)
         self.assertEqual(str(caught.exception), FAILURE)
+
+    def test_a_second_caller_waits_for_the_transcode(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            source = Path(raw) / "vid-mp4.mp4"
+            source.write_bytes(_mp4(b"mp4v"))
+            calls = 0
+            entered = threading.Event()
+            release = threading.Event()
+
+            def transcode(src: Path, dest: Path) -> None:
+                nonlocal calls
+                calls += 1
+                entered.set()
+                self.assertTrue(release.wait(timeout=2))
+                dest.write_bytes(b"AVC-PLAYABLE")
+
+            results: list[Path] = []
+
+            def run() -> None:
+                results.append(playable_mp4(source))
+
+            first = threading.Thread(target=run)
+            second = threading.Thread(target=run)
+            with patch("scene.playback.ffmpeg_transcode", transcode):
+                first.start()
+                self.assertTrue(entered.wait(timeout=2))
+                second.start()
+                release.set()
+                first.join(timeout=2)
+                second.join(timeout=2)
+            self.assertEqual(calls, 1)
+            self.assertEqual(len(results), 2)
+            self.assertEqual(results[0].read_bytes(), b"AVC-PLAYABLE")
+            self.assertEqual(results[1], results[0])
 
 
 class VideoRouteTest(unittest.TestCase):
