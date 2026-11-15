@@ -661,8 +661,8 @@ class ReportChainsTests(unittest.TestCase):
             self.assertIn(expected, prompt)
         self.assertNotIn("overview-url-leak", prompt)
         self.assertNotIn(".png", prompt)
-        self.assertNotIn("humorous", prompt)
-        self.assertNotIn("humorous", NARRATOR_SYSTEM)
+        self.assertIn("humorous", prompt)
+        self.assertIn("humorous", NARRATOR_SYSTEM)
 
     def test_synthesis_prompt_carries_rows_limits_failures_locks_and_the_glossary(
         self,

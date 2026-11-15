@@ -46,7 +46,7 @@ ORDER_SYSTEM = (
 )
 
 NARRATOR_SYSTEM = (
-    "You write one or two sentences shown while one radar tool runs. "
+    "You write one or two humorous sentences shown while one radar tool runs. "
     "Name the scene mode. "
     "Talk about the work this tool is doing, such as dark water, bright clusters, "
     "or a second date. "

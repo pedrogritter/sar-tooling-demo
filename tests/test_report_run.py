@@ -385,16 +385,24 @@ class RunReportTest(RunnerBase):
             sections["open-water"].briefing_md, "# open-water\n\nbelt text\n"
         )
         self.assertEqual(
-            sections["open-water"].progress_note,
-            "Measuring Open water on this stripmap scene.",
+            sections["open-water"].progress_note, "Working on the dark water."
         )
-        self.assertEqual(chains.narrate_calls, [])
+        self.assertEqual(chains.narrate_calls, ["open-water", "sea-roughness"])
         self.assertEqual(
             sections["open-water"].overview_url,
             f"/api/scenes/{SCENE}/analysis/open-water/overview.png",
         )
 
-    def test_progress_notes_stay_plain_when_the_model_would_joke(self) -> None:
+    def test_a_missing_key_keeps_the_plain_note(self) -> None:
+        with self.patched():
+            self.start([_included("open-water")], FallbackModel())
+            section = self.stored()["open-water"]
+        self.assertEqual(
+            section.progress_note, "Measuring Open water on this stripmap scene."
+        )
+        self.assertEqual(section.status, "done")
+
+    def test_a_narrator_failure_stores_the_plain_sentence(self) -> None:
         chains = FakeChains()
         chains.note = "The detective referee plays water polo."
         chains.note_error = RuntimeError("narrator is down")
@@ -405,7 +413,7 @@ class RunReportTest(RunnerBase):
         self.assertEqual(
             section.progress_note, "Measuring Open water on this stripmap scene."
         )
-        self.assertEqual(chains.narrate_calls, [])
+        self.assertEqual(chains.narrate_calls, ["open-water"])
         text = (self.root / "scenes" / SCENE / "report" / "report.json").read_text(
             "utf-8"
         )
@@ -528,11 +536,9 @@ class RunReportTest(RunnerBase):
             self.start([_included("open-water")], chains)
             section = self.stored()["open-water"]
         self.assertEqual(self.ran, [])
-        self.assertEqual(chains.narrate_calls, [])
+        self.assertEqual(chains.narrate_calls, ["open-water"])
         self.assertEqual(section.status, "done")
-        self.assertEqual(
-            section.progress_note, "Measuring Open water on this stripmap scene."
-        )
+        self.assertEqual(section.progress_note, "Working on the dark water.")
 
     def test_amplitude_reuses_only_the_same_partner_directory(self) -> None:
         tool = _included("amplitude-change")
@@ -557,15 +563,13 @@ class RunReportTest(RunnerBase):
         self.assertEqual(sections["open-water"].status, "failed")
         self.assertIn("open-water could not run.", sections["open-water"].briefing_md)
         self.assertEqual(
-            sections["open-water"].progress_note,
-            "Measuring Open water on this stripmap scene.",
+            sections["open-water"].progress_note, "Working on the dark water."
         )
         self.assertEqual(
-            sections["sea-roughness"].progress_note,
-            "Measuring Sea roughness on this stripmap scene.",
+            sections["sea-roughness"].progress_note, "Working on the dark water."
         )
         self.assertEqual(sections["sea-roughness"].status, "done")
-        self.assertEqual(chains.narrate_calls, [])
+        self.assertEqual(chains.narrate_calls, ["open-water", "sea-roughness"])
 
     def test_a_running_section_is_visible_while_its_tool_runs(self) -> None:
         seen: list[str] = []
@@ -597,8 +601,8 @@ class RunReportTest(RunnerBase):
             chains.note = "The detective referee plays water polo."
             self.start([_included("open-water")], chains)
         self.assertEqual(seen, ["running"])
-        self.assertEqual(notes, ["Measuring Open water on this stripmap scene."])
-        self.assertEqual(chains.narrate_calls, [])
+        self.assertEqual(notes, ["The detective referee plays water polo."])
+        self.assertEqual(chains.narrate_calls, ["open-water"])
 
     def test_a_reading_that_is_not_a_string_is_an_error(self) -> None:
         path = self.root / "scenes" / SCENE / "report" / "report.json"

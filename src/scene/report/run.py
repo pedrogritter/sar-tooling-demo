@@ -2,10 +2,10 @@
 
 The belt measures. After a done section is saved, one model call may add a
 reading. A model call that fails does not stop the run: the tool order falls
-back to the belt catalog, each step stores a plain progress sentence, a
-rejected reading stays empty, and a synthesis failure becomes a lead built
-from the summary rows. A single-scene lead that invents a second date or a
-stack is discarded too.
+back to the belt catalog, a missing key or a failed narrator stores a plain
+progress sentence, a rejected reading stays empty, and a synthesis failure
+becomes a lead built from the summary rows. A single-scene lead that invents
+a second date or a stack is discarded too.
 """
 
 from __future__ import annotations
@@ -314,14 +314,33 @@ def _limit_sentence(measurement: dict[str, object] | None) -> str:
 
 
 def _narrate(chains: ReportModel, facts: ReportFacts, tool: IncludedTool) -> str:
-    """One plain progress sentence. The model is not asked to write this line."""
+    """The model's line when a key is set, or one plain sentence otherwise.
 
-    del chains
-    return _plain_note(tool.label, facts.mode)
+    ``FallbackModel`` is the missing key, so it is not asked. A failed or
+    blank reply keeps the plain sentence, and the tool still runs.
+    """
+
+    if isinstance(chains, FallbackModel):
+        return _plain_note(tool.label, facts.mode)
+    try:
+        text = chains.narrate(
+            facts,
+            {
+                "id": tool.id,
+                "label": tool.label,
+                "description": tool.description,
+            },
+        )
+    except Exception:  # noqa: BLE001 - the tool still runs after a narrator failure.
+        return _plain_note(tool.label, facts.mode)
+    cleaned = " ".join(text.split())
+    if not cleaned:
+        return _plain_note(tool.label, facts.mode)
+    return cleaned[:500]
 
 
 def _plain_note(label: str, mode: str) -> str:
-    """The progress sentence for one tool. The model does not write it."""
+    """The progress sentence when no key is set, or the narrator does not answer."""
 
     scene_mode = mode or "radar"
     return f"Measuring {label} on this {scene_mode} scene."
