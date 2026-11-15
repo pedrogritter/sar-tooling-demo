@@ -170,6 +170,38 @@ def remember_model_key(key: str) -> None:
     _session_key = cleaned
 
 
+class ModelKeyError(ValueError):
+    """A non-blank key this process will not keep. The text never contains it."""
+
+
+def startup_key_status() -> str:
+    """``unset``, ``environment``, or ``file``.
+
+    A missing or blank value is unset, including a blank environment value
+    that blocks ``.env``. A non-blank value that contains a space, or is
+    longer than 512 characters, raises ``ModelKeyError``. The key is not
+    returned and no model is built.
+    """
+
+    preexisting = os.environ.get("OPENAI_API_KEY")
+    load_local_env()
+    raw = os.environ.get("OPENAI_API_KEY")
+    if raw is None or not raw.strip():
+        return "unset"
+    key = raw.strip()
+    from_environment = preexisting is not None and bool(preexisting.strip())
+    origin = "the environment" if from_environment else ".env"
+    if any(character.isspace() for character in key):
+        raise ModelKeyError(f"OPENAI_API_KEY from {origin} must not contain spaces")
+    if len(key) > 512:
+        raise ModelKeyError(
+            f"OPENAI_API_KEY from {origin} must be at most 512 characters"
+        )
+    if from_environment:
+        return "environment"
+    return "file"
+
+
 def chains_or_none() -> ReportChains | None:
     """Build the chains when a key is set. Otherwise build no model at all.
 
