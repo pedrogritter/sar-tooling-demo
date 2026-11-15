@@ -6,7 +6,7 @@ From the repository root, after ``python -m scene.fetch``:
 
 Then open http://127.0.0.1:8765
 The process reads the STAC record, the scene note, and the quicklook.
-It does not call a model.
+It does not call a model. A bad OpenAI key stops it before it listens.
 """
 
 from __future__ import annotations
@@ -17,13 +17,35 @@ import sys
 
 from scene.demo import seed_if_needed
 from scene.loader import SceneDataError
+from scene.report.chains import ModelKeyError, startup_key_status
 from scene.web import build_state, serve
+
+
+def announce_model_key() -> None:
+    """Log where the key came from. Raise ``ModelKeyError`` without the value.
+
+    Unset still returns. This does not call the model.
+    """
+
+    source = startup_key_status()
+    if source == "unset":
+        logging.info("OPENAI_API_KEY is unset")
+        return
+    if source == "environment":
+        logging.info("OPENAI_API_KEY arrived from the environment")
+        return
+    logging.info("OPENAI_API_KEY arrived from .env")
 
 
 def main() -> None:
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
     host = os.environ.get("SCENE_HOST", "127.0.0.1")
     port = _port(os.environ.get("SCENE_PORT", "8765"))
+    try:
+        announce_model_key()
+    except ModelKeyError as exc:
+        logging.error("%s", exc)
+        sys.exit(1)
     try:
         # An empty data directory gets the labeled placeholder before listen.
         seed_if_needed()

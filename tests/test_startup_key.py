@@ -11,6 +11,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 from scene.report.chains import ModelKeyError, startup_key_status
+from scene.serve import announce_model_key, main
 
 
 class StartupKeyStatusTests(unittest.TestCase):
@@ -82,3 +83,72 @@ class StartupKeyStatusTests(unittest.TestCase):
         ):
             self.assertEqual(startup_key_status(), "environment")
         chat.assert_not_called()
+
+
+class AnnounceModelKeyTests(unittest.TestCase):
+    """The log names the source. It does not name the key or build a model."""
+
+    @contextmanager
+    def _environment(self, env_text: str | None, **environ: str) -> Iterator[None]:
+        with tempfile.TemporaryDirectory() as raw:
+            root = Path(raw)
+            if env_text is not None:
+                (root / ".env").write_text(env_text, encoding="utf-8")
+            with (
+                patch("scene.analyze.project_root", return_value=root),
+                patch.dict(os.environ, environ, clear=True),
+            ):
+                yield
+
+    def test_logs_unset_environment_and_file_without_the_secret(self) -> None:
+        secret = "sk-from-environment"
+        cases: tuple[tuple[str | None, dict[str, str], str], ...] = (
+            (None, {}, "OPENAI_API_KEY is unset"),
+            (
+                None,
+                {"OPENAI_API_KEY": secret},
+                "OPENAI_API_KEY arrived from the environment",
+            ),
+            ("OPENAI_API_KEY=from-dotenv\n", {}, "OPENAI_API_KEY arrived from .env"),
+        )
+        for env_text, environ, sentence in cases:
+            with self.subTest(sentence=sentence):
+                with self._environment(env_text, **environ):
+                    with self.assertLogs(level="INFO") as logs:
+                        announce_model_key()
+                text = "\n".join(logs.output)
+                self.assertIn(sentence, text)
+                self.assertNotIn(secret, text)
+                self.assertNotIn("from-dotenv", text)
+
+    def test_announce_does_not_build_a_model(self) -> None:
+        with (
+            self._environment(None, OPENAI_API_KEY="from-environment"),
+            patch("scene.report.chains.ChatOpenAI") as chat,
+            self.assertLogs(level="INFO"),
+        ):
+            announce_model_key()
+        chat.assert_not_called()
+
+    def test_a_bad_key_exits_before_seed_and_listen(self) -> None:
+        with (
+            patch(
+                "scene.serve.announce_model_key",
+                side_effect=ModelKeyError(
+                    "OPENAI_API_KEY from the environment must not contain spaces"
+                ),
+            ),
+            patch("scene.serve.seed_if_needed") as seed,
+            patch("scene.serve.serve") as serve,
+        ):
+            with self.assertRaises(SystemExit) as raised:
+                main()
+        self.assertEqual(raised.exception.code, 1)
+        seed.assert_not_called()
+        serve.assert_not_called()
+
+    def test_the_image_build_does_not_receive_the_key(self) -> None:
+        text = (Path(__file__).resolve().parents[1] / "Dockerfile").read_text(
+            encoding="utf-8"
+        )
+        self.assertNotIn("OPENAI_API_KEY", text)
