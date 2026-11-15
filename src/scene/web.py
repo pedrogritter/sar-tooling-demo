@@ -362,6 +362,10 @@ def _dispatch_workspace(
         return _json(200, {"scenes": list_library()})
     if path == "/api/guide" and method == "GET":
         return _json(200, guide_payload())
+    if path == "/api/guide/chat":
+        if method == "POST":
+            return _guide_chat(body)
+        return _plain(404, "Not found")
     if path == "/api/demo/clear" and method == "POST":
         return _clear_demo(body)
     if path == "/api/jobs/run" and method == "POST":
@@ -486,6 +490,26 @@ def _report_pdf(scene_id: str) -> HttpResponse:
         LOGGER.exception("report PDF for %s failed", scene_id)
         return _plain(500, REPORT_PDF_FAILED)
     return HttpResponse(200, "application/pdf", document)
+
+
+def _guide_chat(body: bytes) -> HttpResponse:
+    """One guide-chat turn. Unrelated questions do not build a model."""
+
+    parsed = _json_body(body)
+    if isinstance(parsed, HttpResponse):
+        return parsed
+    from .guide_chat import GuideChatError, answer_guide_chat, model_or_none
+
+    pending = parsed.get("pending_section_id")
+    try:
+        payload = answer_guide_chat(
+            parsed.get("message"),
+            None if "pending_section_id" not in parsed else pending,
+            model_or_none(),
+        )
+    except GuideChatError as exc:
+        return _plain(400, str(exc))
+    return _json(200, payload)
 
 
 def _json_body(body: bytes) -> dict[str, object] | HttpResponse:
