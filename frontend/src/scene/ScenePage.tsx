@@ -20,6 +20,7 @@ import { demoBannerVisible } from "@/scene/placeholder"
 import { ImageStage } from "@/scene/ImageStage"
 import { escapeClosesTool } from "@/scene/keyboard"
 import { MetadataOverlay } from "@/scene/MetadataOverlay"
+import { DocumentationView } from "@/guide/DocumentationView"
 import { ReportView } from "@/scene/ReportView"
 import { SettingsDialog } from "@/scene/SettingsDialog"
 import { ToolPicker } from "@/scene/ToolPicker"
@@ -32,6 +33,7 @@ import {
   isAnalysisTool,
   selectTool,
   toolById,
+  toolReplacesStage,
   type ToolId,
 } from "@/scene/tools"
 import type {
@@ -372,6 +374,12 @@ export function ScenePage() {
               setTool(null)
             }}
           />
+        ) : tool === "documentation" ? (
+          <DocumentationView
+            onClose={() => {
+              setTool(null)
+            }}
+          />
         ) : (
           <div className="relative min-h-[40vh] min-w-0 flex-1 md:min-h-0">
             <ImageStage
@@ -398,7 +406,7 @@ export function ScenePage() {
           </div>
         )}
 
-        {tool && tool !== "report" && selected ? (
+        {tool && !toolReplacesStage(tool) && selected ? (
           <section
             aria-label={selected.label}
             className="flex max-h-[50vh] min-h-0 flex-col border-t md:max-h-none md:w-96 md:border-t-0 md:border-l"

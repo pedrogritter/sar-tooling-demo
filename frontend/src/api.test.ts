@@ -2,6 +2,7 @@ import {
   ApiError,
   MeasureJobConflictError,
   fetchCurrentJob,
+  fetchGuide,
   fetchModelKey,
   fetchScene,
   isReportKeyRequiredError,
@@ -32,6 +33,31 @@ describe("scene api", () => {
 
     await expect(fetchScene()).resolves.toEqual({ scene_id: "ICEYE" })
     expect(fetchMock).toHaveBeenCalledWith("/api/scene", undefined)
+  })
+
+  it("loads the usage guide", async () => {
+    fetchMock.mockResolvedValue(
+      jsonResponse({
+        sections: [
+          {
+            id: "what-this-is",
+            title: "What this application does",
+            paragraphs: ["A bright mark is a bright radar return."],
+          },
+        ],
+      })
+    )
+
+    await expect(fetchGuide()).resolves.toEqual({
+      sections: [
+        {
+          id: "what-this-is",
+          title: "What this application does",
+          paragraphs: ["A bright mark is a bright radar return."],
+        },
+      ],
+    })
+    expect(fetchMock).toHaveBeenCalledWith("/api/guide", undefined)
   })
 
   it("posts the scene, the tool, and the partner", async () => {
