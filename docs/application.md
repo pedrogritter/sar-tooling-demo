@@ -58,6 +58,7 @@ Startup loads the Lisbon STAC item, the scene note, the fallback static files, a
 | `src/scene/belt/` | Analysis tools. Each tool reads a coarse overview and writes a picture, a measurement, and a short briefing. |
 | `src/scene/report/` | The scene report. The code chooses the tools. LangChain orders them and writes the lead when a key is set, and a belt lead is stored when it is not. A key writes a short humorous progress note. Without a key the note is a plain sentence. It saves `report/report.json` and a WeasyPrint PDF. The page does not ask a question. |
 | `src/scene/guide.py` | The usage guide. Quotes the belt limits, the glossary, and the scene note. No model call. |
+| `src/scene/guide_chat.py` | The guide chat. Answers from the usage guide, the glossary, and the scene note. An unrelated question does not call a model. |
 | `src/scene/grid.py` | Affine from full-resolution pixels to longitude and latitude (`proj:transform`). |
 | `src/scene/quicklook.py` | Turns `qlk-cog.tif` into the grayscale PNG the browser shows. |
 | `src/scene/page.py` | Fallback HTML. No question box. |
@@ -124,6 +125,7 @@ The server is `ThreadingHTTPServer` from the standard library. It binds `127.0.0
 | `GET /api/scenes/<id>/report` | The saved report, partial while a job runs. Fields: `question` (empty for a new run), `partner_id`, `phase` (`planning`, `running`, `writing`, `done`), `tool_order`, `synthesis_md`, `synthesis_source` (`model` or `belt`), and `sections`. Each section has `progress_note`. An empty `sections` list when none was saved. |
 | `GET /api/scenes/<id>/report.pdf` | The saved report as a WeasyPrint PDF. 404 when none was saved. 500 with `The report PDF could not be written.` when the writer fails. The route does not call the model. |
 | `GET /api/guide` | The usage guide. Body: `sections`. Each section has `id`, `title`, and `paragraphs`. The route does not call a model and does not read a raster. |
+| `POST /api/guide/chat` | One guide-chat turn. Body: `message`, and `pending_section_id` null or a section id. Reply fields: `reply`, `section_id`, `section_title`, `open_section`. An unrelated question does not call the model. The route does not run a tool and does not read a raster. |
 | `GET /api/report/key` | Whether this process has an OpenAI key. Body: `configured` and `source` (`unset`, `environment`, or `session`). The key is not returned. |
 | `POST /api/report/key` | Keep a key for this process only. Body: `api_key`. Nothing is written to disk. 409 when a key already arrived from the environment. 400 when the key is empty, contains spaces, or is longer than 512 characters. The response is the same status object as the GET, and it does not echo the key. |
 | `POST /api/jobs/run` | Start one belt tool. Body: `scene_id`, `tool_id`, optional `partner_id`. |
@@ -268,6 +270,12 @@ Documentation is a Scene-column tool, for a reader who is not a radar analyst. C
 
 The guide may quote STAC fields, the glossary, the scene note, and tool limit sentences. It does not name a ship, match AIS, or say that a model inspected a raster. A bright mark stays a bright radar return. This view does not run a tool and does not download a scene.
 
+### Guide chat
+
+A button fixed at the bottom right is labeled Ask. It opens a chat labeled Guide chat. The person can ask about a belt tool or about SAR. `POST /api/guide/chat` answers from the usage guide, `content/sar_glossary.md`, and `content/scene_note.md`. The model is `gpt-4o-mini` at temperature 0, and only when a key is set and the question is about this viewer or about SAR. An unrelated question does not call the model. The reply is "This chat answers questions about this viewer and about SAR. It does not answer that."
+
+When the question matches a guide section, the reply asks "Open the {title} section?" and the panel shows a button. Yes, or that button, opens Documentation at that section. Without a key the reply is "Set an OpenAI key in Settings to ask a question." and the section button still appears. The chat does not run a tool and does not download a scene. It may not read a raster, name a vessel, match AIS, or drop a limit sentence. A bright mark stays a bright radar return. This chat is not the tool-choosing agent.
+
 ### Fallback page and the Lisbon briefing
 
 With no `frontend/dist/index.html`, `GET /` renders the Python page from `scene.page`. That page shows the quicklook, the STAC fields, which assets are on disk, and `content/scene_note.md`. It states that no detector has run. It has no question box.
@@ -377,7 +385,7 @@ A model in any of the items below may phrase measurements, STAC fields, the scen
 
 ### Guide chat
 
-- [ ] A small button fixed at the bottom right opens a chat. The person can ask about a belt tool or about SAR. A question is answered from the model's training and from the texts the page may already quote: the usage guide, `content/sar_glossary.md`, and `content/scene_note.md`. When the question matches a section of the usage guide, the reply asks whether to open that section and shows a button. Answering yes or pressing the button opens that section. The chat does not run a tool, does not download a scene, and does not answer outside this project, so a turn cannot spend tokens on an unrelated subject. It may not read a raster, name a vessel, match AIS, or drop a limit sentence. This chat is not the tool-choosing agent below.
+- [x] A small button fixed at the bottom right opens a chat about a belt tool or about SAR. An unrelated question does not call the model. A matching guide section can be opened from the reply. See Guide chat above.
 
 ### Tool review
 
