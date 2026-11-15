@@ -99,6 +99,9 @@ def _section(scene_id: str, section: ReportSection) -> str:
         parts.append(f"<p>Compared with: {html.escape(section.partner_id)}</p>")
     if section.status == "done":
         parts.append(_summary(section.measurement))
+        prose = _chosen_prose(section)
+        if prose.strip():
+            parts.append(_blocks(prose))
     elif section.briefing_md.strip():
         parts.append(_blocks(section.briefing_md))
     picture = _picture(scene_id, section)
@@ -107,6 +110,18 @@ def _section(scene_id: str, section: ReportSection) -> str:
         parts.append(f'<img src="{src}" alt="{label}">')
     parts.append("</section>")
     return "\n".join(parts)
+
+
+def _chosen_prose(section: ReportSection) -> str:
+    """The reading when a done section has one, otherwise the belt briefing.
+
+    Locked and failed sections keep ``briefing_md`` even if a reading was stored.
+    Whitespace alone does not count as a reading.
+    """
+
+    if section.status == "done" and section.reading_md.strip():
+        return section.reading_md
+    return section.briefing_md
 
 
 def _summary(measurement: dict[str, object] | None) -> str:

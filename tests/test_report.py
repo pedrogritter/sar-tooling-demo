@@ -767,6 +767,55 @@ class ReportChainsTests(unittest.TestCase):
         self.assertNotIn("stack_scope", prompt)
         self.assertNotIn("matched_dates", prompt)
 
+    def test_reading_prompt_has_the_rows_the_limit_and_no_picture_or_glossary(
+        self,
+    ) -> None:
+        steady = FakeChatModel(text="A careful reading.")
+        narrator = FakeChatModel(text="NARRATOR LEAK")
+        facts = dataclasses.replace(self.facts, scene_id=LISBON_SCENE_ID)
+        section = ReportSection(
+            tool_id="open-water",
+            status="done",
+            measurement={
+                "summary": [{"label": "Water area", "value": "12.5 %"}],
+                "limit": "Dark pixels are not proof of water.",
+                "overview_path": "/data/overview-path-leak.png",
+            },
+            briefing_md="glossary-leak Sigma-nought is radar brightness.",
+            briefing_source="belt",
+            overview_url="/api/overview-url-leak.png",
+            partner_id=None,
+            progress_note="A joke about a ship that must stay off the page.",
+        )
+        text = ReportChains(steady, narrator).read_section(facts, section)
+        self.assertEqual(text, "A careful reading.")
+        self.assertEqual(narrator.seen, [])
+        prompt = steady.prompt_text()
+        for expected in (
+            "12.5 %",
+            "Dark pixels are not proof of water.",
+            LISBON_SCENE_ID,
+            "stripmap",
+            "ship",
+            "spill",
+            "tide height",
+            "building height",
+            "limit sentence",
+            "offer a reading",
+        ):
+            self.assertIn(expected, prompt)
+        for leak in (
+            "overview-path-leak",
+            "overview-url-leak",
+            "glossary-leak",
+            "A joke about a ship",
+            "NARRATOR LEAK",
+            "Glossary",
+            ".png",
+            ".tif",
+        ):
+            self.assertNotIn(leak, prompt)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -1,8 +1,9 @@
-"""Order the tools, narrate one step, then write the lead.
+"""Order the tools, narrate one step, then write the lead and each reading.
 
 Each is a plain prompt-to-model chain. Nothing is sent until the caller invokes
 it, and ``chains_or_none`` builds nothing when no key is set. No call receives
-a raster, a quicklook, or an overview image.
+a raster, a quicklook, or an overview image. A section reading also receives
+no glossary.
 """
 
 from __future__ import annotations
@@ -69,6 +70,16 @@ SYNTHESIS_SYSTEM = (
     "Do not return JSON or a code block."
 )
 
+READING_SYSTEM = (
+    "You write the reading of one finished radar tool. "
+    "You are given the scene, that tool's summary rows, and its limit sentence. "
+    "You may restate the summary and offer a reading of what those numbers support. "
+    "Keep the limit sentence, unchanged, in the reply. "
+    "Do not name a ship, a spill, a tide height, or a building height. "
+    "A bright return stays a bright radar return. "
+    "Do not return JSON or a code block."
+)
+
 
 class OrderChoice(BaseModel):
     """The structured answer the order chain must give. Ids are checked by the run."""
@@ -77,7 +88,7 @@ class OrderChoice(BaseModel):
 
 
 class ReportChains:
-    """Order and synthesis at temperature 0, and the narrator at temperature 0.7."""
+    """Order, reading, and synthesis at temperature 0. Narrator at 0.7."""
 
     def __init__(self, steady: BaseChatModel, narrator: BaseChatModel) -> None:
         self._order: Runnable[dict[str, str], dict[str, Any] | BaseModel] = (
@@ -96,6 +107,13 @@ class ReportChains:
         self._synthesis: Runnable[dict[str, str], str] = (
             ChatPromptTemplate.from_messages(
                 [("system", SYNTHESIS_SYSTEM), ("human", "{request}")]
+            )
+            | steady
+            | StrOutputParser()
+        )
+        self._reading: Runnable[dict[str, str], str] = (
+            ChatPromptTemplate.from_messages(
+                [("system", READING_SYSTEM), ("human", "{request}")]
             )
             | steady
             | StrOutputParser()
@@ -136,6 +154,15 @@ class ReportChains:
             facts, partner_id, sections, glossary, stack_scope, matched_dates
         )
         return self._synthesis.invoke({"request": request})
+
+    def read_section(self, facts: ReportFacts, section: ReportSection) -> str:
+        """One tool's reading. The run keeps it only after its own checks.
+
+        The payload is the scene, that tool's summary rows, and its limit.
+        No image path and no glossary are included.
+        """
+
+        return self._reading.invoke({"request": _reading_request(facts, section)})
 
 
 # A key typed on the page. It lives in this process and is never written out.
@@ -208,7 +235,8 @@ def chains_or_none() -> ReportChains | None:
     ``load_local_env`` reads .env first, and an environment value already set
     wins over it. A blank key counts as unset. A key kept by
     ``remember_model_key`` is already in the environment, so it is used too.
-    Order and synthesis use temperature 0. The narrator uses temperature 0.7.
+    Order, the section reading, and synthesis use temperature 0. The narrator
+    uses temperature 0.7. The reading reuses that temperature-0 model.
     """
 
     load_local_env()
@@ -279,6 +307,20 @@ def _synthesis_request(
             "Do not mention a second date, a stack, a partner, or a cause."
         )
     return "\n\n".join(parts)
+
+
+def _reading_request(facts: ReportFacts, section: ReportSection) -> str:
+    """Scene fields, one tool's summary rows, and its limit. Nothing else."""
+
+    measurement = section.measurement or {}
+    summary = measurement.get("summary")
+    limit = measurement.get("limit")
+    payload = {
+        "scene": _scene_fields(facts),
+        "summary": summary if isinstance(summary, list) else [],
+        "limit": limit if isinstance(limit, str) else "",
+    }
+    return f"Write the reading for this tool.\n\n{_dump(payload)}"
 
 
 def _result_row(section: ReportSection) -> dict[str, object]:
