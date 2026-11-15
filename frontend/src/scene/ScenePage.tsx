@@ -21,6 +21,7 @@ import { ImageStage } from "@/scene/ImageStage"
 import { escapeClosesTool } from "@/scene/keyboard"
 import { MetadataOverlay } from "@/scene/MetadataOverlay"
 import { DocumentationView } from "@/guide/DocumentationView"
+import { GuideChat } from "@/guide/GuideChat"
 import { ReportView } from "@/scene/ReportView"
 import { SettingsDialog } from "@/scene/SettingsDialog"
 import { ToolPicker } from "@/scene/ToolPicker"
@@ -74,6 +75,13 @@ export function ScenePage() {
   const [downloadWatch, setDownloadWatch] = useState(0)
   const [clearingDemo, setClearingDemo] = useState(false)
   const [clearError, setClearError] = useState<string | null>(null)
+  const [guideSection, setGuideSection] = useState<string | null>(null)
+
+  useEffect(() => {
+    if (tool !== "documentation") {
+      setGuideSection(null)
+    }
+  }, [tool])
 
   const loadLibrary = useCallback(async () => {
     setLibraryLoading(true)
@@ -376,8 +384,10 @@ export function ScenePage() {
           />
         ) : tool === "documentation" ? (
           <DocumentationView
+            focusSectionId={guideSection}
             onClose={() => {
               setTool(null)
+              setGuideSection(null)
             }}
           />
         ) : (
@@ -485,6 +495,12 @@ export function ScenePage() {
           setDockExpanded(false)
         }}
         onOpen={openSceneOnStage}
+      />
+      <GuideChat
+        onOpenSection={(sectionId) => {
+          setGuideSection(sectionId)
+          setTool("documentation")
+        }}
       />
     </div>
   )
