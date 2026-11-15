@@ -20,6 +20,7 @@ import { demoBannerVisible } from "@/scene/placeholder"
 import { ImageStage } from "@/scene/ImageStage"
 import { MetadataOverlay } from "@/scene/MetadataOverlay"
 import { ReportView } from "@/scene/ReportView"
+import { SettingsDialog } from "@/scene/SettingsDialog"
 import { ToolPicker } from "@/scene/ToolPicker"
 import {
   stageFor,
@@ -320,7 +321,8 @@ export function ScenePage() {
             </p>
           )}
         </div>
-        <div className="justify-self-end">
+        <div className="flex items-center justify-self-end gap-2">
+          <SettingsDialog />
           <ThemeToggle />
         </div>
       </header>
