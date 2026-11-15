@@ -46,7 +46,7 @@ browser
         +-- placeholder seed and clear       (scene.demo)
 ```
 
-`docker compose up --build` builds one image and publishes port 8765. The image holds Python 3.12, curl, the package, `content/`, and `frontend/dist`. Node 26.13.0 builds the page. The image does not hold radar files, `intelligence/`, `.env`, or `OPENAI_API_KEY`. `docker compose up` copies the committed Lisbon preview, thumbnail, dwell video, and analysis results. It does not contain a GRD, an SLC, a colorized image, a dwell stack, or a quicklook COG. Compose passes that key from the shell or from a gitignored `.env` beside `docker-compose.yml` when one is set. An empty value counts as unset. A named volume is mounted at `/app/data`. `SCENE_HOST` is `0.0.0.0` inside the container. Before it listens, `scene.serve` calls `seed_if_needed`. `demo/build_seed.py` copies `demo/lisbon` into `demo/seed` during the image build, then the seed is copied into the volume. The drawn placeholder remains only when `demo/lisbon` is missing. The seed is not baked into `/app/data`, because the volume mount would hide it.
+`docker compose up --build` builds one image and publishes port 8765. The image holds Python 3.12, curl, ffmpeg, the package, `content/`, and `frontend/dist`. Node 26.13.0 builds the page. The image does not hold radar files, `intelligence/`, `.env`, or `OPENAI_API_KEY`. `docker compose up` copies the committed Lisbon preview, thumbnail, dwell video, and analysis results. It does not contain a GRD, an SLC, a colorized image, a dwell stack, or a quicklook COG. Compose passes that key from the shell or from a gitignored `.env` beside `docker-compose.yml` when one is set. An empty value counts as unset. A named volume is mounted at `/app/data`. `SCENE_HOST` is `0.0.0.0` inside the container. Before it listens, `scene.serve` calls `seed_if_needed`. `demo/build_seed.py` copies `demo/lisbon` into `demo/seed` during the image build, then the seed is copied into the volume. The drawn placeholder remains only when `demo/lisbon` is missing. The seed is not baked into `/app/data`, because the volume mount would hide it.
 
 Startup loads the Lisbon STAC item, the scene note, the fallback static files, and the Lisbon quicklook when `qlk-cog.tif` is present. Before it listens, startup logs whether `OPENAI_API_KEY` arrived from the environment or from `.env`. A missing or blank value logs that the key is unset and the process still boots. A non-blank value that contains a space, or is longer than 512 characters, is logged without the value and the process exits before it seeds or listens. Startup does not call the model. `GET /` then serves `frontend/dist/index.html` when that file exists. When the build is missing, the same route serves the original Python page: the quicklook, the STAC fields, and `content/scene_note.md`.
 
@@ -61,6 +61,7 @@ Startup loads the Lisbon STAC item, the scene note, the fallback static files, a
 | `src/scene/guide_chat.py` | The guide chat. Answers from the usage guide, the glossary, and the scene note. An unrelated question does not call a model. |
 | `src/scene/grid.py` | Affine from full-resolution pixels to longitude and latitude (`proj:transform`). |
 | `src/scene/quicklook.py` | Turns `qlk-cog.tif` into the grayscale PNG the browser shows. |
+| `src/scene/playback.py` | The dwell video the browser can decode. An `mp4v` file is copied to H.264 beside it. `vid-cog.tif` is not read here. |
 | `src/scene/page.py` | Fallback HTML. No question box. |
 | `src/scene/markdown.py` | Small markdown renderer for the note and for briefings. Headings, paragraphs, lists, bold, and inline code. |
 | `src/scene/static/` | `scene.css` and `scene.js` for the fallback page. Both must be present at startup. |
@@ -104,7 +105,7 @@ The Lisbon script is separate. It writes `intelligence/measurements.json`, `inte
 
 Belt tools do not read the full raster. `scene.belt.raster` takes the COG overview whose long side is at most about 1600 pixels for a GRD, and about 1200 for a dwell stack. Sigma-nought is `calibration_factor * DN^2`, in decibels. The factor is read from `grd-json.json` (`iceye:calibration_factor`, `sar:calibration_factor`, or `calibration_factor`). The Lisbon scene has a hardcoded factor when that sidecar omits it. Areas use the ground size of those overview pixels, from `proj:transform` in the same sidecar.
 
-`grd-json.json` is not part of the preview pack. A tool that looks runnable still fails at read time when the sidecar is missing. The dwell video on the stage is `vid-mp4`. Dwell motion reads `vid-cog.tif`, the georeferenced stack.
+`grd-json.json` is not part of the preview pack. A tool that looks runnable still fails at read time when the sidecar is missing. The dwell video on the stage is `vid-mp4`, sent as H.264 when the product file is `mp4v`. Dwell motion reads `vid-cog.tif`, the georeferenced stack.
 
 ### HTTP
 
@@ -118,7 +119,7 @@ The server is `ThreadingHTTPServer` from the standard library. It binds `127.0.0
 | `GET /api/scenes/<id>` | One scene on disk. The `intelligence/` measurement is attached only for the test scene. The stage does not draw `/overview.png`. |
 | `GET /api/scenes/<id>/quicklook.png` | `qlk-cog.tif` rendered to a grayscale PNG, long edge at most 1600, cached by file mtime. When that COG is absent and `preview.png` is present, those PNG bytes are returned unchanged. The `graphic` file is served when neither is present. |
 | `GET /api/scenes/<id>/thumbnail` | The local `graphic` file. |
-| `GET /api/scenes/<id>/video` | The local `vid-mp4` file, as `video/mp4`. The response advertises `Accept-Ranges: bytes`. One `Range: bytes=start-end` header is a 206 with that slice. `vid-cog.tif` is not served here. |
+| `GET /api/scenes/<id>/video` | The dwell video, as `video/mp4`, with `Accept-Ranges: bytes`. One `Range: bytes=start-end` header is a 206 with that slice. The stage still asks for `vid-mp4`. When that file's sample entry is `mp4v`, the bytes are a cached H.264 copy, `vid-mp4.mp4.avc.mp4`, written beside it. The downloaded `vid-mp4` stays. A failed transcode is 500 with `The dwell video could not be prepared for playback.` `vid-cog.tif` is not served here. |
 | `GET /api/scenes/<id>/tools` | Every belt tool, with its lock sentence, pair partners, an overview URL, and the saved summary and briefing when those files are on disk. |
 | `POST /api/demo/clear` | Remove placeholder pictures, analysis files, and `demo.json`. The STAC record stays. Body must be empty. 404 when no scene is marked as a placeholder. |
 | `POST /api/scenes/<id>/report/run` | Start the report. Body: `partner_id` null, or one scene id. The code chooses the tools. 400 when `partner_id` is missing or not a scene id (`partner_id must be null or one scene id`), when the partner is not eligible (`partner_id is not a scene this report can compare.`), or when nothing can run (`No tool can run for this scene.`). A missing key still starts the job. A second measurement returns 409 with `{"status": "running"}`. |
@@ -168,6 +169,8 @@ The belt (`scene.belt`) is the path the tool column runs. It works for any scene
 ### Preview
 
 Opens the scene on the stage. The caption switches among quicklook, thumbnail, and dwell video, and names the collected time. A choice is disabled when that file is not on disk. The caption hides those choices while an analysis picture is on the stage. The Preview pane holds the description. The quicklook stays in product orientation. It is not a map and not a detection layer. While the library is still loading and no scene is open, the stage says it is opening the library. With no scene open after that, the stage asks for a library scene. With a scene and no quicklook, it asks for the preview pack.
+
+The dwell choice plays `GET /api/scenes/<id>/video`. That route still reads `vid-mp4`. The committed Lisbon file is MPEG-4 Part 2, sample entry `mp4v`, which Chromium does not decode. The route then sends a cached H.264 copy, `vid-mp4.mp4.avc.mp4`, written beside the product file with ffmpeg (`libx264`, faststart). The downloaded `vid-mp4` bytes stay. `vid-cog.tif` stays the motion raster and is not the file the stage plays. A failed transcode is 500 with `The dwell video could not be prepared for playback.`
 
 ### Catalog
 
@@ -381,7 +384,7 @@ A model in any of the items below may phrase measurements, STAC fields, the scen
 
 ### Preview video
 
-- [ ] The dwell choice on the preview stage must play. The stage video is `vid-mp4`, served by `GET /api/scenes/<id>/video` with byte ranges. Find why playback fails and fix that path. `vid-cog.tif` stays the motion raster and is not the file the stage plays.
+- [x] The dwell choice on the preview stage plays. The stage video is still `vid-mp4`, served by `GET /api/scenes/<id>/video` with byte ranges. An `mp4v` file is sent as a cached H.264 copy. `vid-cog.tif` stays the motion raster and is not the file the stage plays. See Preview above.
 
 ### Guide chat
 
