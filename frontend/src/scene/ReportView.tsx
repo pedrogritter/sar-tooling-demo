@@ -5,11 +5,8 @@ import {
   MeasureJobConflictError,
   fetchAnalysisTools,
   fetchCurrentJob,
-  fetchModelKey,
   fetchReport,
-  isReportKeyRequiredError,
   reportPdfUrl,
-  saveModelKey,
   startReportRun,
 } from "@/api"
 import { Button, buttonVariants } from "@/components/ui/button"
@@ -35,7 +32,7 @@ import {
   shouldLoadReport,
   synthesisText,
 } from "@/scene/report"
-import type { JobSnapshot, ModelKeySource, Report } from "@/types"
+import type { JobSnapshot, Report } from "@/types"
 
 const POLL_INTERVAL_MS = 400
 
@@ -50,13 +47,6 @@ interface ReportViewProps {
  * row and are not copied into the document.
  */
 export function ReportView({ sceneId, onClose }: ReportViewProps) {
-  const [keySource, setKeySource] = useState<ModelKeySource | "loading">(
-    "loading"
-  )
-  const [keyDraft, setKeyDraft] = useState("")
-  const [savingKey, setSavingKey] = useState(false)
-  const [keyError, setKeyError] = useState<string | null>(null)
-  const [replacingKey, setReplacingKey] = useState(false)
   const [report, setReport] = useState<Report | null>(null)
   const [reportError, setReportError] = useState<string | null>(null)
   const [job, setJob] = useState<JobSnapshot | null>(null)
@@ -68,31 +58,7 @@ export function ReportView({ sceneId, onClose }: ReportViewProps) {
   const [partnerChoice, setPartnerChoice] = useState("")
 
   const running = job?.status === "running"
-  const askingForKey = keySource === "unset" || replacingKey
-  const startDisabled = replacingKey || starting || running
-
-  // The form reads whether a key is set. Start does not wait for one.
-  useEffect(() => {
-    let active = true
-
-    void fetchModelKey()
-      .then((status) => {
-        if (active) {
-          setKeySource(status.source)
-          setKeyError(null)
-        }
-      })
-      .catch((error: unknown) => {
-        if (active) {
-          setKeySource("unset")
-          setKeyError(messageFrom(error, "Could not check the OpenAI key."))
-        }
-      })
-
-    return () => {
-      active = false
-    }
-  }, [])
+  const startDisabled = starting || running
 
   // Load what is already saved, and pick up a job that is already running.
   useEffect(() => {
@@ -224,28 +190,6 @@ export function ReportView({ sceneId, onClose }: ReportViewProps) {
     }
   }, [])
 
-  async function saveKey() {
-    const apiKey = keyDraft.trim()
-
-    if (!apiKey) {
-      return
-    }
-
-    setSavingKey(true)
-    setKeyError(null)
-
-    try {
-      const status = await saveModelKey(apiKey)
-      setKeySource(status.source)
-      setKeyDraft("")
-      setReplacingKey(false)
-    } catch (error) {
-      setKeyError(messageFrom(error, "Could not save the OpenAI key."))
-    } finally {
-      setSavingKey(false)
-    }
-  }
-
   async function start() {
     if (!sceneId || startDisabled) {
       return
@@ -261,14 +205,6 @@ export function ReportView({ sceneId, onClose }: ReportViewProps) {
     try {
       await startReportRun(sceneId, partnerId)
     } catch (error) {
-      if (isReportKeyRequiredError(error)) {
-        const message = messageFrom(error, "Could not start the report.")
-        setKeySource("unset")
-        setKeyError(message)
-        setStarting(false)
-        return
-      }
-
       setRunError(messageFrom(error, "Could not start the report."))
 
       // A job already running is still worth watching. Any other failure is not.
@@ -327,46 +263,13 @@ export function ReportView({ sceneId, onClose }: ReportViewProps) {
                 name a ship, a spill, a tide height, or a building height.
               </p>
               <p className="text-sm leading-6 text-muted-foreground">
+                A key in Settings lets the model write the lead. Start still
+                measures without one.
+              </p>
+              <p className="text-sm leading-6 text-muted-foreground">
                 A scene that is only in the catalogue is not downloaded.
               </p>
             </header>
-
-            {keySource === "loading" && !keyError ? (
-              <p className="text-sm text-muted-foreground">
-                Checking whether an OpenAI key is set.
-              </p>
-            ) : null}
-
-            {keySource === "environment" ? (
-              <p className="text-sm text-muted-foreground">
-                An OpenAI key is set for this server, so the report can order
-                the measurements, narrate each step, and write the reading.
-              </p>
-            ) : null}
-
-            {askingForKey ? (
-              <KeyForm
-                draft={keyDraft}
-                saving={savingKey}
-                error={keyError}
-                replacing={replacingKey}
-                onDraft={setKeyDraft}
-                onCancel={() => {
-                  setReplacingKey(false)
-                  setKeyDraft("")
-                  setKeyError(null)
-                }}
-                onSubmit={() => {
-                  void saveKey()
-                }}
-              />
-            ) : null}
-
-            {keyError && !askingForKey ? (
-              <p role="alert" className="text-sm text-destructive">
-                {keyError}
-              </p>
-            ) : null}
 
             <form
               className="flex flex-col gap-2"
@@ -400,21 +303,6 @@ export function ReportView({ sceneId, onClose }: ReportViewProps) {
                   {selectedPartner
                     ? "Amplitude change uses this second scene. Stack measurements still use every matched date, not only this one."
                     : "This scene only runs the measurements that stand on their own. A second scene adds amplitude change and the stack measurements. A stack uses every matched date."}
-                </p>
-              ) : null}
-              {keySource === "session" && !replacingKey ? (
-                <p className="text-sm text-muted-foreground">
-                  A key entered on this page is set for this server.{" "}
-                  <Button
-                    type="button"
-                    variant="link"
-                    className="h-auto px-0"
-                    onClick={() => {
-                      setReplacingKey(true)
-                    }}
-                  >
-                    Use a different key
-                  </Button>
                 </p>
               ) : null}
               {complete ? (
@@ -526,73 +414,6 @@ export function ReportView({ sceneId, onClose }: ReportViewProps) {
         </ScrollArea>
       </section>
     </>
-  )
-}
-
-/** The key field shown when this server has no key, or when a page key is replaced. */
-function KeyForm({
-  draft,
-  saving,
-  error,
-  replacing,
-  onDraft,
-  onCancel,
-  onSubmit,
-}: {
-  draft: string
-  saving: boolean
-  error: string | null
-  replacing: boolean
-  onDraft: (value: string) => void
-  onCancel: () => void
-  onSubmit: () => void
-}) {
-  return (
-    <form
-      className="flex flex-col gap-2 rounded-md border p-3"
-      onSubmit={(event) => {
-        event.preventDefault()
-        onSubmit()
-      }}
-    >
-      <p className="text-sm leading-6 text-muted-foreground">
-        Without a key, Start still measures and the lead is built from the
-        summary rows. A key lets the model write that lead. A key saved here
-        stays in this running server only. It is not written into the project
-        or the image. Restarting the container clears it. You can also put
-        OPENAI_API_KEY in a .env file next to docker-compose.yml, or export it
-        in the shell, and start the container again.
-      </p>
-      <label className="flex flex-col gap-1 text-sm font-medium">
-        OpenAI API key
-        <input
-          className="rounded-md border bg-background px-2 py-1.5 text-sm font-normal"
-          type="password"
-          name="openai-api-key"
-          autoComplete="off"
-          value={draft}
-          disabled={saving}
-          onChange={(event) => {
-            onDraft(event.target.value)
-          }}
-        />
-      </label>
-      <div className="flex items-center gap-2">
-        <Button type="submit" disabled={saving || !draft.trim()}>
-          {saving ? "Saving key" : "Save key"}
-        </Button>
-        {replacing ? (
-          <Button type="button" variant="ghost" onClick={onCancel}>
-            Cancel
-          </Button>
-        ) : null}
-      </div>
-      {error ? (
-        <p role="alert" className="text-sm text-destructive">
-          {error}
-        </p>
-      ) : null}
-    </form>
   )
 }
 

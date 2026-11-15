@@ -18,8 +18,10 @@ import { headerFactLine } from "@/lib/format"
 import { AnalysisPane } from "@/scene/AnalysisPane"
 import { demoBannerVisible } from "@/scene/placeholder"
 import { ImageStage } from "@/scene/ImageStage"
+import { escapeClosesTool } from "@/scene/keyboard"
 import { MetadataOverlay } from "@/scene/MetadataOverlay"
 import { ReportView } from "@/scene/ReportView"
+import { SettingsDialog } from "@/scene/SettingsDialog"
 import { ToolPicker } from "@/scene/ToolPicker"
 import {
   stageFor,
@@ -230,14 +232,18 @@ export function ScenePage() {
 
   useEffect(() => {
     function onKey(event: KeyboardEvent) {
-      if (event.key !== "Escape") {
-        return
-      }
-
       const target = event.target
-      if (
+      const fieldFocused =
         target instanceof HTMLElement &&
-        target.closest("input, textarea, select")
+        Boolean(target.closest("input, textarea, select"))
+      const dialogOpen = document.querySelector("[data-slot='dialog-popup']") !== null
+
+      if (
+        !escapeClosesTool({
+          key: event.key,
+          dialogOpen,
+          fieldFocused,
+        })
       ) {
         return
       }
@@ -320,7 +326,8 @@ export function ScenePage() {
             </p>
           )}
         </div>
-        <div className="justify-self-end">
+        <div className="flex items-center justify-self-end gap-2">
+          <SettingsDialog />
           <ThemeToggle />
         </div>
       </header>
