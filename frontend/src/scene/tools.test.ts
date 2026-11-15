@@ -4,6 +4,7 @@ import {
   isGroupOpen,
   selectTool,
   toolById,
+  toolReplacesStage,
 } from "@/scene/tools"
 
 describe("selected tool", () => {
@@ -45,5 +46,19 @@ describe("selected tool", () => {
     expect(isGroupOpen("Surface", "open-water", [])).toBe(true)
     expect(isGroupOpen("Objects", "open-water", [])).toBe(false)
     expect(isGroupOpen("Surface", "catalog", [])).toBe(false)
+  })
+
+  it("lists Documentation as a scene tool that replaces the stage", () => {
+    const documentation = SHELL_TOOLS.find((tool) => tool.id === "documentation")
+
+    expect(documentation?.label).toBe("Documentation")
+    expect(documentation?.description).toBe(
+      "How to use this page, and what a measurement may say."
+    )
+    expect(isAnalysisTool("documentation")).toBe(false)
+    expect(toolReplacesStage("documentation")).toBe(true)
+    expect(toolReplacesStage("report")).toBe(true)
+    expect(toolReplacesStage("preview")).toBe(false)
+    expect(toolReplacesStage(null)).toBe(false)
   })
 })

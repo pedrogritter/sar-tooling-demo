@@ -1,6 +1,7 @@
 import {
   Activity,
   ArrowLeftRight,
+  BookOpen,
   Boxes,
   Building,
   CalendarClock,
@@ -39,6 +40,7 @@ const ICONS: Record<(typeof SHELL_TOOLS)[number]["id"], LucideIcon> = {
   catalog: Search,
   library: FolderOpen,
   report: FileText,
+  documentation: BookOpen,
 }
 
 const TOOL_ICONS: Record<(typeof ANALYSIS_TOOLS)[number]["id"], LucideIcon> = {

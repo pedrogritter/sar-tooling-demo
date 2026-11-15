@@ -22,6 +22,11 @@ export const SHELL_TOOLS = [
     description:
       "A full report of this scene. It runs the measurements this scene can support and writes a reading you can download.",
   },
+  {
+    id: "documentation",
+    label: "Documentation",
+    description: "How to use this page, and what a measurement may say.",
+  },
 ] as const
 
 export const ANALYSIS_TOOLS = [
@@ -173,4 +178,9 @@ export function toolById(id: string) {
 
 export function isAnalysisTool(id: ToolId): boolean {
   return ANALYSIS_TOOLS.some((tool) => tool.id === id)
+}
+
+/** Report and Documentation replace the stage. Other tools keep the picture. */
+export function toolReplacesStage(id: ToolId | null): boolean {
+  return id === "report" || id === "documentation"
 }

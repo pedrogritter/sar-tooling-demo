@@ -40,6 +40,22 @@ export async function fetchScene(): Promise<SceneResponse> {
   return requestJson<SceneResponse>("/api/scene")
 }
 
+export async function fetchGuide(): Promise<{
+  sections: {
+    id: string
+    title: string
+    paragraphs: string[]
+  }[]
+}> {
+  return requestJson<{
+    sections: {
+      id: string
+      title: string
+      paragraphs: string[]
+    }[]
+  }>("/api/guide")
+}
+
 export async function startMeasureJob(): Promise<MeasureJobAccepted> {
   try {
     return await requestJson<MeasureJobAccepted>("/api/jobs/measure", {
