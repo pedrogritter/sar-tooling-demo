@@ -62,6 +62,7 @@ from .paths import (
     static_dir,
     valid_scene_id,
 )
+from .playback import PlaybackError, playable_mp4
 from .report.pdf import build_pdf
 from .report.run import FallbackModel, ReportModel, run_report
 from .report.select import IneligiblePartner, choose_tools, nothing_runnable_sentence
@@ -825,8 +826,12 @@ def _scene_route(
             or not _inside_scene(scene_id, video.local_path)
         ):
             return _plain(404, "Not found")
+        try:
+            playable = playable_mp4(video.local_path)
+        except PlaybackError:
+            return _plain(500, "The dwell video could not be prepared for playback.")
         return _file_response(
-            video.local_path, "video/mp4", range_header=range_header
+            playable, "video/mp4", range_header=range_header
         )
     return _scene_json(scene_id, manager)
 
