@@ -55,13 +55,18 @@ export interface RailStep {
   note: string | null
 }
 
-/** A finished measurement in the document: picture, summary rows, and limit. */
+/** A finished measurement: picture, summary rows, prose, and limit. */
 export interface FigureView {
   toolId: string
   label: string
   status: string
   imageUrl: string | null
   summary: { label: string; value: string }[]
+  /**
+   * The reading when it has text. Otherwise the belt briefing. Locked and
+   * failed cards are not figures, so they keep the briefing on their own.
+   */
+  prose: string
   limit: string | null
   partnerId: string | null
 }
@@ -276,6 +281,7 @@ export function figureViews(report: Report): FigureView[] {
       status: statusLabel(section.status),
       imageUrl: section.overview_url,
       summary: summaryFromMeasurement(section.measurement),
+      prose: sectionProse(section),
       limit: limitSentence(section.measurement),
       partnerId: section.partner_id,
     })
@@ -526,6 +532,18 @@ function toolKey(toolId: string): string {
   return `tool:${toolId}`
 }
 
+/**
+ * Visible prose for a done section. A reading with any non-whitespace text
+ * is shown. A blank reading leaves the belt briefing in place.
+ */
+function sectionProse(section: ReportSection): string {
+  if (section.reading_md.trim() !== "") {
+    return section.reading_md
+  }
+
+  return section.briefing_md
+}
+
 function limitSentence(measurement: Measurement | null): string | null {
   const limit = measurement?.limit
 
@@ -559,6 +577,7 @@ function normalizeSection(raw: Record<string, unknown>): ReportSection {
     measurement: measurement as Measurement | null,
     briefing_md: typeof raw.briefing_md === "string" ? raw.briefing_md : "",
     briefing_source: textSource(raw.briefing_source),
+    reading_md: typeof raw.reading_md === "string" ? raw.reading_md : "",
     overview_url:
       typeof raw.overview_url === "string" ? raw.overview_url : null,
     partner_id: typeof raw.partner_id === "string" ? raw.partner_id : null,

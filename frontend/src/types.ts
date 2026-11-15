@@ -205,6 +205,11 @@ export interface ReportSection {
   measurement: Measurement | null
   briefing_md: string
   briefing_source: ReportTextSource
+  /**
+   * A reading of this done section. An older file omits the key, and a
+   * rejected or skipped call stores nothing, so the page treats both as blank.
+   */
+  reading_md: string
   overview_url: string | null
   partner_id: string | null
   /** Narrator line for the live rail. It is not part of the finished document. */
