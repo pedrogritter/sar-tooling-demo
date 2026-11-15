@@ -8,6 +8,7 @@ import {
   isReportKeyRequiredError,
   reportPdfUrl,
   saveModelKey,
+  sendGuideChat,
   startAnalysisJob,
   startReportRun,
   startMeasureJob,
@@ -58,6 +59,32 @@ describe("scene api", () => {
       ],
     })
     expect(fetchMock).toHaveBeenCalledWith("/api/guide", undefined)
+  })
+
+  it("posts a guide question and the pending section", async () => {
+    fetchMock.mockResolvedValue(
+      jsonResponse({
+        reply: "Opening Open water.",
+        section_id: "tool-open-water",
+        section_title: "Open water",
+        open_section: true,
+      })
+    )
+
+    await expect(sendGuideChat("Yes", "tool-open-water")).resolves.toEqual({
+      reply: "Opening Open water.",
+      section_id: "tool-open-water",
+      section_title: "Open water",
+      open_section: true,
+    })
+    expect(fetchMock).toHaveBeenCalledWith("/api/guide/chat", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        message: "Yes",
+        pending_section_id: "tool-open-water",
+      }),
+    })
   })
 
   it("posts the scene, the tool, and the partner", async () => {

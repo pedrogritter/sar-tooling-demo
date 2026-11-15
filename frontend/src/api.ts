@@ -56,6 +56,30 @@ export async function fetchGuide(): Promise<{
   }>("/api/guide")
 }
 
+export async function sendGuideChat(
+  message: string,
+  pendingSectionId: string | null
+): Promise<{
+  reply: string
+  section_id: string | null
+  section_title: string | null
+  open_section: boolean
+}> {
+  return requestJson<{
+    reply: string
+    section_id: string | null
+    section_title: string | null
+    open_section: boolean
+  }>("/api/guide/chat", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      message,
+      pending_section_id: pendingSectionId,
+    }),
+  })
+}
+
 export async function startMeasureJob(): Promise<MeasureJobAccepted> {
   try {
     return await requestJson<MeasureJobAccepted>("/api/jobs/measure", {

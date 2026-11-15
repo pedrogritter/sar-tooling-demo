@@ -15,13 +15,17 @@ import {
 
 interface DocumentationViewProps {
   onClose: () => void
+  focusSectionId?: string | null
 }
 
 /**
  * Usage guide. The stage is replaced while this is open.
  * Sentences come from GET /api/guide. This view does not run a tool.
  */
-export function DocumentationView({ onClose }: DocumentationViewProps) {
+export function DocumentationView({
+  onClose,
+  focusSectionId = null,
+}: DocumentationViewProps) {
   const [guide, setGuide] = useState<GuideDocument | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -54,6 +58,16 @@ export function DocumentationView({ onClose }: DocumentationViewProps) {
       active = false
     }
   }, [])
+
+  useEffect(() => {
+    if (!focusSectionId || !guide) {
+      return
+    }
+
+    window.document
+      .getElementById(focusSectionId)
+      ?.scrollIntoView({ block: "start" })
+  }, [focusSectionId, guide])
 
   return (
     <div className="flex min-h-0 min-w-0 flex-1 flex-col">
