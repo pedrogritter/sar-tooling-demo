@@ -1,9 +1,11 @@
 """Build the report: order the tools, run each one, then write one lead.
 
-The belt measures. A model call that fails does not stop the run: the tool
-order falls back to the belt catalog, each step stores a plain progress
-sentence, and a synthesis failure becomes a lead built from the summary rows.
-A single-scene lead that invents a second date or a stack is discarded too.
+The belt measures. After a done section is saved, one model call may add a
+reading. A model call that fails does not stop the run: the tool order falls
+back to the belt catalog, each step stores a plain progress sentence, a
+rejected reading stays empty, and a synthesis failure becomes a lead built
+from the summary rows. A single-scene lead that invents a second date or a
+stack is discarded too.
 """
 
 from __future__ import annotations
@@ -31,6 +33,9 @@ OnStep = Callable[[int, str], None]
 
 LOCKED_FALLBACK = "The belt keeps this tool locked for this scene."
 
+# Phrases a section reading must not contain. The match is case-insensitive.
+_BANNED_READING = ("ship", "spill", "tide height", "building height")
+
 
 class ReportModel(Protocol):
     """The part of ``ReportChains`` the run needs. Tests give it a fake."""
@@ -51,6 +56,8 @@ class ReportModel(Protocol):
         stack_scope: str | None,
         matched_dates: int | None,
     ) -> str: ...
+
+    def read_section(self, facts: ReportFacts, section: ReportSection) -> str: ...
 
 
 class FallbackModel:
@@ -74,6 +81,9 @@ class FallbackModel:
         stack_scope: str | None,
         matched_dates: int | None,
     ) -> str:
+        raise RuntimeError("No model is configured.")
+
+    def read_section(self, facts: ReportFacts, section: ReportSection) -> str:
         raise RuntimeError("No model is configured.")
 
 
@@ -235,7 +245,72 @@ def _build_section(
         partner_id=partner,
         progress_note=note,
     )
-    return _save(store, report, section)
+    report = _save(store, report, section)
+    return _with_reading(chains, facts, section, store, report)
+
+
+def _with_reading(
+    chains: ReportModel | None,
+    facts: ReportFacts,
+    section: ReportSection,
+    store: ReportStore,
+    report: Report,
+) -> Report:
+    """Ask for a reading only after the belt section is already saved.
+
+    No key skips the call. ``FallbackModel`` is that missing key. An exception,
+    a blank reply, or a rejected reply leaves ``reading_md`` empty and does
+    not write the file again. A kept reply is the only second save.
+    """
+
+    if chains is None or isinstance(chains, FallbackModel):
+        return report
+    try:
+        reply = chains.read_section(facts, section)
+    except Exception:  # noqa: BLE001 - a failed reading keeps the belt briefing.
+        return report
+    kept = _accepted_reading(reply, section.measurement)
+    if not kept:
+        return report
+    return _save(store, report, replace(section, reading_md=kept))
+
+
+def _accepted_reading(text: str, measurement: dict[str, object] | None) -> str:
+    """The reply when it can be kept, otherwise an empty string.
+
+    Reject a blank reply, a reply that names a ship, a spill, a tide height,
+    or a building height, and a reply that drops a non-empty limit sentence.
+    Those four phrases are matched without regard to case. The limit sentence
+    has to appear unchanged.
+    """
+
+    if _names_a_target(text):
+        return ""
+    limit = _limit_sentence(measurement)
+    if limit and limit not in text:
+        return ""
+    cleaned = text.strip()
+    if not cleaned:
+        return ""
+    return cleaned
+
+
+def _names_a_target(text: str) -> bool:
+    """True when the reply contains one of the banned phrases."""
+
+    folded = text.casefold()
+    return any(phrase in folded for phrase in _BANNED_READING)
+
+
+def _limit_sentence(measurement: dict[str, object] | None) -> str:
+    """The belt's limit sentence, or empty when this section has none."""
+
+    if measurement is None:
+        return ""
+    limit = measurement.get("limit")
+    if isinstance(limit, str):
+        return limit
+    return ""
 
 
 def _narrate(chains: ReportModel, facts: ReportFacts, tool: IncludedTool) -> str:

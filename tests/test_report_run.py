@@ -14,7 +14,7 @@ from unittest.mock import patch
 from scene.belt.catalog import analysis_dir, tool_spec
 from scene.jobs import JobAlreadyRunningError, MeasurementJobManager
 from scene.report.facts import ReportFacts
-from scene.report.run import run_report
+from scene.report.run import FallbackModel, ReportModel, run_report
 from scene.report.select import STACK_SCOPE, IncludedTool, ToolSet
 from scene.report.store import Report, ReportSection, ReportStore
 from tests import test_belt
@@ -58,6 +58,10 @@ class FakeChains:
         self.glossary = ""
         self.stack_scope: str | None = None
         self.phase_during_order: str | None = None
+        self.reading = f"Dark water covers part of the frame. {WATER_LIMIT}"
+        self.reading_error: BaseException | None = None
+        self.reading_calls: list[str] = []
+        self.stored_during_reading: Report | None = None
 
     def order(
         self, facts: ReportFacts, tools: Sequence[Mapping[str, str]]
@@ -94,6 +98,16 @@ class FakeChains:
         if self.lead_error is not None:
             raise self.lead_error
         return self.lead
+
+    def read_section(self, facts: ReportFacts, section: ReportSection) -> str:
+        """The section reading. Records the tool and the file already on disk."""
+
+        del facts
+        self.reading_calls.append(section.tool_id)
+        self.stored_during_reading = ReportStore(SCENE).load()
+        if self.reading_error is not None:
+            raise self.reading_error
+        return self.reading
 
 
 def _included(
@@ -216,6 +230,7 @@ class StoreTest(RunnerBase):
             overview_url="/api/scenes/a/analysis/open-water/overview.png",
             partner_id=None,
             progress_note="Measuring open water.",
+            reading_md="Dark water, and the limit stays.",
         )
         report = Report(
             scene_id=SCENE,
@@ -257,7 +272,16 @@ class StoreTest(RunnerBase):
                 "overview_url",
                 "partner_id",
                 "progress_note",
+                "reading_md",
             },
+        )
+        self.assertEqual(
+            payload["sections"][0]["reading_md"],
+            "Dark water, and the limit stays.",
+        )
+        self.assertEqual(
+            section.to_dict()["reading_md"],
+            "Dark water, and the limit stays.",
         )
 
     def test_an_older_file_still_loads_and_waiting_is_still_accepted(self) -> None:
@@ -294,13 +318,14 @@ class StoreTest(RunnerBase):
         self.assertEqual(loaded.synthesis_source, "belt")
         self.assertEqual(loaded.sections[0].status, "waiting")
         self.assertEqual(loaded.sections[0].progress_note, "")
+        self.assertEqual(loaded.sections[0].reading_md, "")
 
 
 class RunReportTest(RunnerBase):
     def start(
         self,
         tools: list[IncludedTool],
-        chains: FakeChains,
+        chains: ReportModel,
         partner_id: str | None = None,
         matched_dates: int | None = None,
     ) -> None:
@@ -574,6 +599,136 @@ class RunReportTest(RunnerBase):
         self.assertEqual(seen, ["running"])
         self.assertEqual(notes, ["Measuring Open water on this stripmap scene."])
         self.assertEqual(chains.narrate_calls, [])
+
+    def test_a_reading_that_is_not_a_string_is_an_error(self) -> None:
+        path = self.root / "scenes" / SCENE / "report" / "report.json"
+        path.parent.mkdir(parents=True)
+        path.write_text(
+            json.dumps(
+                {
+                    "scene_id": SCENE,
+                    "question": "",
+                    "sections": [
+                        {
+                            "tool_id": "open-water",
+                            "status": "done",
+                            "measurement": None,
+                            "briefing_md": "belt text",
+                            "briefing_source": "belt",
+                            "overview_url": None,
+                            "partner_id": None,
+                            "reading_md": 3,
+                        }
+                    ],
+                }
+            ),
+            encoding="utf-8",
+        )
+        with self.patched(), self.assertRaises(ValueError):
+            ReportStore(SCENE).load()
+
+    def test_a_kept_reading_is_stored_and_the_belt_briefing_stays(self) -> None:
+        chains = FakeChains()
+        chains.reading = f"Dark water covers part of the frame. {WATER_LIMIT}"
+        with self.patched():
+            self.start([_included("open-water")], chains)
+            section = self.stored()["open-water"]
+            during = chains.stored_during_reading
+        assert during is not None
+        saved_first = next(
+            item for item in during.sections if item.tool_id == "open-water"
+        )
+        self.assertEqual(saved_first.status, "done")
+        self.assertEqual(saved_first.reading_md, "")
+        self.assertEqual(saved_first.briefing_md, "# open-water\n\nbelt text\n")
+        self.assertEqual(saved_first.briefing_source, "belt")
+        self.assertEqual(section.reading_md, chains.reading)
+        self.assertEqual(section.briefing_md, "# open-water\n\nbelt text\n")
+        self.assertEqual(section.briefing_source, "belt")
+        self.assertEqual(chains.reading_calls, ["open-water"])
+
+    def test_a_rejected_reading_stores_an_empty_string(self) -> None:
+        limit = WATER_LIMIT
+        replies = {
+            "ship": f"One Ship returns brightly. {limit}",
+            "spill": f"One spill darkens the water. {limit}",
+            "tide height": f"The Tide Height is not measured. {limit}",
+            "building height": f"The BUILDING HEIGHT is not measured. {limit}",
+            "missing limit": "Dark pixels cover part of the frame.",
+            "blank": " \n\t",
+        }
+        for name, reply in replies.items():
+            with self.subTest(name=name):
+                chains = FakeChains()
+                chains.reading = reply
+                with self.patched():
+                    self.start([_included("open-water")], chains)
+                    section = self.stored()["open-water"]
+                self.assertEqual(section.reading_md, "")
+                self.assertEqual(section.briefing_md, "# open-water\n\nbelt text\n")
+                self.assertEqual(section.briefing_source, "belt")
+                self.assertEqual(chains.reading_calls, ["open-water"])
+
+    def test_a_raised_reading_call_stores_an_empty_string(self) -> None:
+        chains = FakeChains()
+        chains.reading_error = RuntimeError("reading is down")
+        chains.reading = f"Kept by mistake. {WATER_LIMIT}"
+        with self.patched():
+            self.start([_included("open-water")], chains)
+            section = self.stored()["open-water"]
+        self.assertEqual(section.reading_md, "")
+        self.assertEqual(section.briefing_md, "# open-water\n\nbelt text\n")
+        self.assertEqual(chains.reading_calls, ["open-water"])
+
+    def test_a_locked_section_is_not_sent_for_a_reading(self) -> None:
+        chains = FakeChains()
+        chains.reading = f"Dark water covers part of the frame. {WATER_LIMIT}"
+        reason = "This collect has no dwell stack."
+        with self.patched():
+            self.start(
+                [
+                    _included("dwell-motion", locked=True, reason=reason),
+                    _included("open-water"),
+                ],
+                chains,
+            )
+            sections = self.stored()
+        self.assertEqual(chains.reading_calls, ["open-water"])
+        self.assertEqual(sections["dwell-motion"].reading_md, "")
+        self.assertEqual(sections["dwell-motion"].briefing_md, reason)
+        self.assertEqual(sections["open-water"].reading_md, chains.reading)
+
+    def test_a_failed_section_is_not_sent_for_a_reading(self) -> None:
+        self.failing = {"open-water"}
+        chains = FakeChains()
+        chains.reading = f"The split is roughness. {ROUGH_LIMIT}"
+        with self.patched():
+            self.start([_included("open-water"), _included("sea-roughness")], chains)
+            sections = self.stored()
+        self.assertEqual(chains.reading_calls, ["sea-roughness"])
+        self.assertEqual(sections["open-water"].status, "failed")
+        self.assertEqual(sections["open-water"].reading_md, "")
+        self.assertEqual(sections["sea-roughness"].reading_md, chains.reading)
+
+    def test_a_missing_model_skips_the_reading_call(self) -> None:
+        class Counting(FallbackModel):
+            def __init__(self) -> None:
+                self.reads = 0
+
+            def read_section(
+                self, facts: ReportFacts, section: ReportSection
+            ) -> str:
+                self.reads += 1
+                return super().read_section(facts, section)
+
+        chains = Counting()
+        with self.patched():
+            self.start([_included("open-water")], chains)
+            section = self.stored()["open-water"]
+        self.assertEqual(chains.reads, 0)
+        self.assertEqual(section.reading_md, "")
+        self.assertEqual(section.briefing_source, "belt")
+        self.assertEqual(section.briefing_md, "# open-water\n\nbelt text\n")
 
 
 class StartReportTest(unittest.TestCase):

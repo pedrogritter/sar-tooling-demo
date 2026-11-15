@@ -6,7 +6,7 @@ import json
 import os
 from dataclasses import asdict, dataclass, field, replace
 from pathlib import Path
-from typing import Literal
+from typing import Literal, cast
 
 from scene.paths import scene_dir
 
@@ -31,6 +31,10 @@ class ReportSection:
     partner_id: str | None
     # The narrator line shown while this tool runs. Empty once that was not saved.
     progress_note: str = ""
+    # A model reading of a done section. Empty when the key is missing, there
+    # is no model, or the reply was blank, rejected, or the call failed.
+    # It never replaces ``briefing_md``.
+    reading_md: str = ""
 
     @classmethod
     def from_dict(cls, raw: dict[str, object]) -> ReportSection:
@@ -52,7 +56,13 @@ class ReportSection:
             overview_url=overview_url if isinstance(overview_url, str) else None,
             partner_id=partner_id if isinstance(partner_id, str) else None,
             progress_note=str(raw.get("progress_note", "")),
+            reading_md=_reading_text(raw),
         )
+
+    def to_dict(self) -> dict[str, object]:
+        """The section as it is written into ``report.json``."""
+
+        return cast("dict[str, object]", asdict(self))
 
 
 @dataclass(frozen=True)
@@ -145,13 +155,28 @@ class ReportStore:
             "tool_order": list(report.tool_order),
             "synthesis_md": report.synthesis_md,
             "synthesis_source": report.synthesis_source,
-            "sections": [asdict(section) for section in report.sections],
+            "sections": [section.to_dict() for section in report.sections],
         }
         path = self.path
         path.parent.mkdir(parents=True, exist_ok=True)
         temp = path.with_suffix(".json.tmp")
         temp.write_text(json.dumps(payload, indent=2), encoding="utf-8")
         os.replace(temp, path)
+
+
+def _reading_text(raw: dict[str, object]) -> str:
+    """``reading_md`` when it is a string. A missing key is empty.
+
+    A present value that is not a string is an error, same as the other
+    typed keys in the report file.
+    """
+
+    if "reading_md" not in raw:
+        return ""
+    value = raw["reading_md"]
+    if isinstance(value, str):
+        return value
+    raise ValueError("reading_md must be a string")
 
 
 def _object(value: object) -> dict[str, object]:

@@ -16,6 +16,7 @@ from unittest.mock import patch
 from scene.belt.catalog import ToolView, analysis_dir, tool_spec
 from scene.jobs import MeasurementJobManager
 from scene.report.facts import ReportFacts
+from scene.report.pdf import render_html
 from scene.report.select import STACK_SCOPE
 from scene.report.store import Report, ReportSection, ReportStore
 from scene.web import AppState, HttpResponse, dispatch
@@ -112,6 +113,10 @@ class FakeChains:
     ) -> str:
         del facts, partner_id, sections, glossary, stack_scope, matched_dates
         return "A hedged reading."
+
+    def read_section(self, facts: ReportFacts, section: ReportSection) -> str:
+        del facts, section
+        return ""
 
 
 class WebBase(unittest.TestCase):
@@ -363,6 +368,7 @@ class GetReportTest(WebBase):
         self.assertEqual(document["phase"], "done")
         self.assertEqual(document["sections"][0]["status"], "waiting")
         self.assertEqual(document["sections"][0]["progress_note"], "")
+        self.assertEqual(document["sections"][0]["reading_md"], "")
 
     def test_partial_sections_are_returned(self) -> None:
         with self.patched():
@@ -410,6 +416,7 @@ def _section(
     measurement: dict[str, object] | None = None,
     partner_id: str | None = None,
     progress_note: str = "",
+    reading_md: str = "",
 ) -> ReportSection:
     return ReportSection(
         tool_id=tool_id,
@@ -420,6 +427,7 @@ def _section(
         overview_url=None,
         partner_id=partner_id,
         progress_note=progress_note,
+        reading_md=reading_md,
     )
 
 
@@ -486,6 +494,63 @@ class PdfTest(WebBase):
         self.assertIn("@page", document)
         self.assertIn("counter(page)", document)
         self.assertIn("break-before: page", document)
+
+    def test_a_done_section_prints_the_reading_or_the_belt_briefing(self) -> None:
+        reading = "Dark water covers part of the frame."
+        belt = "belt briefing that the reading replaces"
+        document = render_html(
+            Report(
+                scene_id=SCENE,
+                question="",
+                sections=[
+                    _section(
+                        "open-water",
+                        "done",
+                        belt,
+                        {
+                            "summary": [
+                                {"label": "Water area", "value": "1.20 km²"}
+                            ],
+                            "limit": WATER_LIMIT,
+                        },
+                        reading_md=reading,
+                    ),
+                    _section(
+                        "sea-roughness",
+                        "done",
+                        "roughness belt briefing",
+                        {
+                            "summary": [{"label": "Rough share", "value": "4 %"}],
+                            "limit": "This split is roughness, not a wave height.",
+                        },
+                        reading_md="   ",
+                    ),
+                    _section(
+                        "dwell-motion",
+                        "locked",
+                        LOCK_REASON,
+                        reading_md="A locked reading that must stay off the page.",
+                    ),
+                    _section(
+                        "returns-on-water",
+                        "failed",
+                        "returns-on-water could not run.",
+                        reading_md="A failed reading that must stay off the page.",
+                    ),
+                ],
+            )
+        )
+        self.assertLess(document.index("1.20 km²"), document.index(WATER_LIMIT))
+        self.assertLess(document.index(WATER_LIMIT), document.index(reading))
+        self.assertNotIn(belt, document)
+        self.assertIn("roughness belt briefing", document)
+        self.assertLess(
+            document.index("4 %"), document.index("roughness belt briefing")
+        )
+        self.assertIn(LOCK_REASON, document)
+        self.assertNotIn("locked reading", document)
+        self.assertIn("returns-on-water could not run.", document)
+        self.assertNotIn("failed reading", document)
 
     def test_a_missing_report_is_a_404(self) -> None:
         with self.patched():
