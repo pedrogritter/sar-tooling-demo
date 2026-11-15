@@ -1,6 +1,6 @@
 # Application
 
-Last reviewed: 2026-11-12.
+Last reviewed: 2026-11-15.
 
 This file is the current description of the local ICEYE open-data viewer. Read it before changing a feature or deciding what the page may say. Update it in the same change when behavior, routes, constraints, or planned work change. Keep the claims as careful as the code.
 
@@ -48,7 +48,7 @@ browser
 
 `docker compose up --build` builds one image and publishes port 8765. The image holds Python 3.12, curl, the package, `content/`, and `frontend/dist`. Node 26.13.0 builds the page. The image does not hold radar files, `intelligence/`, `.env`, or `OPENAI_API_KEY`. `docker compose up` copies the committed Lisbon preview, thumbnail, dwell video, and analysis results. It does not contain a GRD, an SLC, a colorized image, a dwell stack, or a quicklook COG. Compose passes that key from the shell or from a gitignored `.env` beside `docker-compose.yml` when one is set. An empty value counts as unset. A named volume is mounted at `/app/data`. `SCENE_HOST` is `0.0.0.0` inside the container. Before it listens, `scene.serve` calls `seed_if_needed`. `demo/build_seed.py` copies `demo/lisbon` into `demo/seed` during the image build, then the seed is copied into the volume. The drawn placeholder remains only when `demo/lisbon` is missing. The seed is not baked into `/app/data`, because the volume mount would hide it.
 
-Startup loads the Lisbon STAC item, the scene note, the fallback static files, and the Lisbon quicklook when `qlk-cog.tif` is present. `GET /` then serves `frontend/dist/index.html` when that file exists. When the build is missing, the same route serves the original Python page: the quicklook, the STAC fields, and `content/scene_note.md`.
+Startup loads the Lisbon STAC item, the scene note, the fallback static files, and the Lisbon quicklook when `qlk-cog.tif` is present. Before it listens, startup logs whether `OPENAI_API_KEY` arrived from the environment or from `.env`. A missing or blank value logs that the key is unset and the process still boots. A non-blank value that contains a space, or is longer than 512 characters, is logged without the value and the process exits before it seeds or listens. Startup does not call the model. `GET /` then serves `frontend/dist/index.html` when that file exists. When the build is missing, the same route serves the original Python page: the quicklook, the STAC fields, and `content/scene_note.md`.
 
 ### Repository map
 
@@ -145,7 +145,7 @@ Hashed files under `frontend/dist` are cached for a year. `index.html` is `no-st
 
 ### Frontend
 
-`frontend/src/App.tsx` renders one `ScenePage`. The shell is a header, a tool column, a stage, one right-hand pane, and a download dock along the bottom. The header puts the radar mark and the name Open data on the left. The center is labeled Selected scene: "25 de Abril bridge" for the test scene and the scene id otherwise, then the collected time, platform, mode, band, and polarization. That facts line opens the metadata card. The card starts closed. The tool column lists Scene (Preview, Catalog, Library, Report), then the measurement groups. A group is a disclosure with a chevron, not a tool. Groups stay collapsed until opened, and the group that holds the selected tool stays open. Each measurement has its own icon. A locked tool stays clickable and shows a lock; the pane still names the missing file. The pane starts closed. On a narrow viewport the column scrolls sideways and the pane stacks under the stage. Choosing the open tool, Close, or Escape shuts the pane. Escape is ignored while focus is in a field. Opening a scene from the catalog or the library closes the pane.
+`frontend/src/App.tsx` renders one `ScenePage`. The shell is a header, a tool column, a stage, one right-hand pane, and a download dock along the bottom. The header puts the radar mark and the name Open data on the left. The center is labeled Selected scene: "25 de Abril bridge" for the test scene and the scene id otherwise, then the collected time, platform, mode, band, and polarization. That facts line opens the metadata card. The card starts closed. The tool column lists Scene (Preview, Catalog, Library, Report), then the measurement groups. A group is a disclosure with a chevron, not a tool. Groups stay collapsed until opened, and the group that holds the selected tool stays open. Each measurement has its own icon. A locked tool stays clickable and shows a lock; the pane still names the missing file. The pane starts closed. On a narrow viewport the column scrolls sideways and the pane stacks under the stage. Choosing the open tool, Close, or Escape shuts the pane. Escape is ignored while focus is in a field. Opening a scene from the catalog or the library closes the pane. A Settings button beside the theme control opens a modal. The modal sets an OpenAI key for this process through `POST /api/report/key`. The key is not written to disk and is not echoed. A key that arrived from the environment keeps the field hidden. Restarting the process clears a key entered in the modal. Host, port, and catalogue URLs stay out of the modal. Escape closes the tool pane only when that modal is closed and focus is not in a field.
 
 The stage shows the quicklook, thumbnail, or dwell video. A belt picture replaces that preview only when the selected tool produced it and the URL contains `/analysis/<that-tool>/`. The Lisbon `/overview.png` is not that picture.
 
@@ -235,7 +235,7 @@ Change and stack tools compare scenes that share a look: same orbit direction, s
 
 On the page, Report replaces the picture. The opening text says what Start will measure and what it will not claim. A bright return stays a bright radar return. The prose may not name a ship, a spill, a tide height, or a building height. A scene that is only in the catalogue is not downloaded. The person may leave the second-scene choice as this scene only, or pick one partner from the amplitude-change list. That list is the unlocked partners already on disk with the same look. No eligible partner hides the picker. **Start** posts `{ "partner_id": null }` or one scene id. The body has no question and no tool ids. If nothing can run, the route answers 400 and does not start a job. The page shows that sentence. The side pane is titled **This report**. While the job runs it lists Plan, each id in `tool_order`, then Write the report. The active row shows the narrator line. Finished sections appear in the document with their picture and summary as they save. A saved report stays on the page, and Start again replaces it. **Download PDF** requests `GET /api/scenes/<id>/report.pdf`.
 
-Without a key, Start still measures and the lead is built from the summary rows. A key lets the model write that lead. **Save key** keeps it in this process only. Restarting the container clears a key entered there. A key that arrived from the environment is used as it is, and the field stays hidden. **Use a different key** is offered only for a key entered on the page. The key form is not a gate.
+Without a key, Start still measures and the lead is built from the summary rows. A key lets the model write that lead. The key is set from Settings in the header, not from this pane. Restarting the container clears a key entered there. A key that arrived from the environment is used as it is, and the field stays hidden. The key form is not a gate.
 
 The set is chosen in code, from the belt's lock state for the open scene:
 
@@ -291,7 +291,7 @@ Runtime Python dependencies are numpy, Pillow, scipy, tifffile, and imagecodecs.
 | --- | --- | --- |
 | `SCENE_HOST` | `127.0.0.1` | Address `scene.serve` binds. |
 | `SCENE_PORT` | `8765` | Port. Must be an integer from 1 to 65535. |
-| `OPENAI_API_KEY` | unset | Optional. Compose passes the shell value, or the value in a gitignored `.env` beside `docker-compose.yml`. The report page can also set it for the running process, and that value is not written to disk. A blank value counts as unset. The image does not contain it. The report uses LangChain to order tools and write the lead when a key is set, and a belt lead when it is not. Progress notes stay plain sentences either way. Without a key, Start still measures. The code chooses which tools run. `scene.analyze` uses it to phrase `measurements.json`. |
+| `OPENAI_API_KEY` | unset | Optional. Compose passes the shell value, or the value in a gitignored `.env` beside `docker-compose.yml`. The Settings modal can also set it for the running process, and that value is not written to disk. A blank value counts as unset and the process still boots. A non-blank value that contains a space, or is longer than 512 characters, stops startup before listen. The log names that problem and does not include the value. The image build does not receive the key. Startup does not call the model. The report uses LangChain to order tools and write the lead when a key is set, and a belt lead when it is not. Progress notes stay plain sentences either way. Without a key, Start still measures. The code chooses which tools run. `scene.analyze` uses it to phrase `measurements.json`. |
 
 The Lisbon catalogue URL is the constant `STAC_URL` in `src/scene/fetch.py`. The open-data collection URL is `COLLECTION_URL` in `src/scene/catalog.py`.
 
@@ -343,6 +343,51 @@ A model in any of the items below may phrase measurements, STAC fields, the scen
 - [ ] Decide the Lisbon measurement. `POST /api/jobs/measure` and `scene.analyze` still run, and `ResultsSection`, `use-measure-job`, and `fetchScene` are unused by `ScenePage`. Either mount that result on the test scene or retire the unused UI.
 - [x] Date of change states a departure of at least 3 dB in a patch of at least 8 pixels, matching the measurement.
 - [x] The pane uses the belt names: Built-up return, Returns on water, Long structure, Dwell motion, Amplitude change, Water persistence, and Dark sea anomaly.
+
+### Usage guide
+
+- [ ] Add a Documentation section to the React page, for a reader who is not a radar analyst. It explains what the application does, how to search, download, and open a scene, and how to run a tool and a report. It explains the science the page is allowed to state: sigma-nought, incidence, look side, speckle, layover, and a bright return. Each belt tool gets a section that says what the measurement does, which file it reads, and the limit sentence it already carries. Later sections may describe retrieval and a Kubernetes layout as sketches that are not running. The guide may quote STAC fields, `content/sar_glossary.md`, `content/scene_note.md`, and tool limit sentences. It may not name a ship, match AIS, or say that a model inspected a raster.
+
+### Report section readings
+
+- [ ] After a tool section is saved, one model call restates that section's summary in sentences and offers a possible reading. The call receives that tool's summary rows, its limit sentence, and the scene facts. It does not receive a raster, a quicklook, or an overview image. The belt numbers, units, and limit sentence stay in the section. A locked or failed section is not sent. With no key, the section stays the belt briefing. A reading may not name a ship, a spill, a tide height, or a building height, and it may not drop the limit sentence. A call that fails or breaks those limits keeps the belt briefing for that section.
+
+### Settings
+
+- [x] A button beside the theme control in the header opens a small modal. The modal sets an OpenAI key for the running process through `POST /api/report/key`. The key is not written to disk and is not echoed. A key that arrived from the environment stays as it is, and the field stays hidden. Restarting the process clears a key entered in the modal. Host, port, and catalogue URLs stay out of the modal. See the header in Frontend above.
+
+### Container key
+
+- [x] When the container starts, say whether `OPENAI_API_KEY` arrived and from where, and reject a value that is empty, contains spaces, or is longer than 512 characters when one was set. An unset key still boots, because Start measures without one. The image build does not receive the key, and startup does not call the model to prove the key. See Configure above.
+
+### Preview video
+
+- [ ] The dwell choice on the preview stage must play. The stage video is `vid-mp4`, served by `GET /api/scenes/<id>/video` with byte ranges. Find why playback fails and fix that path. `vid-cog.tif` stays the motion raster and is not the file the stage plays.
+
+### Guide chat
+
+- [ ] A small button fixed at the bottom right opens a chat. The person can ask about a belt tool or about SAR. A question is answered from the model's training and from the texts the page may already quote: the usage guide, `content/sar_glossary.md`, and `content/scene_note.md`. When the question matches a section of the usage guide, the reply asks whether to open that section and shows a button. Answering yes or pressing the button opens that section. The chat does not run a tool, does not download a scene, and does not answer outside this project, so a turn cannot spend tokens on an unrelated subject. It may not read a raster, name a vessel, match AIS, or drop a limit sentence. This chat is not the tool-choosing agent below.
+
+### Tool review
+
+- [ ] Review every belt tool for scientific accuracy and for errors against the threshold, the unit, and the limit sentence already written for it. Fix the measurement when it disagrees with that sentence. Where a scene's incidence, mode, or pixel size makes one fixed control a poor fit, add that control to the tool's sidebar for the run. A control changes a threshold or a window the tool already states. It does not add a class the tool does not measure, and it does not let a bright return be named a ship.
+- [ ] After that review and its fixes, measure the Lisbon collect again and replace the committed files in `demo/lisbon` with that result, so the preview, analysis, and report that `docker compose up` copies are the measurements the current tools produce. The tree still has no GRD, SLC, colorized image, dwell stack, or quicklook COG, and it still does not write `demo.json`.
+
+### Architecture
+
+- [ ] Read the process as it is now and write down where the layout disagrees with itself: two measurement paths, a fallback page beside the React page, and code the page no longer mounts. Propose a smaller distribution of modules only where the current split hides a responsibility. Delete code that nothing calls. Leave `POST /api/jobs/measure` and `scene.analyze` until the queued Lisbon decision says to mount that result or retire it. A cleanup does not change what a tool may claim.
+
+### Frontend performance
+
+- [ ] Measure the React page and list the slow paths before changing them. Likely places are the catalog poll while the index fills, the 400 ms job poll, the quicklook and belt pictures, and the first paint of `ScenePage`. Record what is slow and why, then change only those spots. The page still serves one scene, one download, and one measurement.
+
+### Browser tab icon
+
+- [ ] Replace the Vite icon. `frontend/index.html` points at `frontend/public/vite.svg`. The tab should show a mark for this viewer, the same radar mark the header already uses, in both the light and dark themes. The icon is decoration. It does not depict a detection or a named vessel.
+
+### README
+
+- [ ] Rewrite `README.md` so a first visit can see what this is, why it exists, how to run it, and where the careful claims live. Keep the technical sheet: Python 3.12, pnpm, Docker, the port, the optional key, and the test commands. Add the shape a public repository is expected to have: a short description, the status, the data licence, and a pointer to `docs/application.md`. The tone can be plain and lively. It still says the radar files are not in git, that no code licence is declared, and that a bright mark is a bright radar return. This file stays the memory. The README does not copy it.
 
 ### Analyst-facing tools
 
