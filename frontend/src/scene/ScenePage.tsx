@@ -77,6 +77,12 @@ export function ScenePage() {
   const [clearError, setClearError] = useState<string | null>(null)
   const [guideSection, setGuideSection] = useState<string | null>(null)
 
+  useEffect(() => {
+    if (tool !== "documentation") {
+      setGuideSection(null)
+    }
+  }, [tool])
+
   const loadLibrary = useCallback(async () => {
     setLibraryLoading(true)
 
