@@ -191,7 +191,7 @@ On first start, `demo/build_seed.py` seeds the `/app/data` Docker volume with th
 
 ### Run locally from source
 
-Run commands from the repository root (the directory containing [`pyproject.toml`](./pyproject.toml)). Requires **Python 3.12**, **`pnpm`**, **`curl`**, **`ffmpeg`** (for H.264 dwell video playback), and **WeasyPrint** system libraries (`libpango`, `libcairo2`, `libgdk-pixbuf-2.0-0`, `fonts-liberation` for PDF export).
+Run commands from the repository root (the directory containing [`pyproject.toml`](./pyproject.toml)). Requires **Python 3.12**, **`pnpm`**, **`curl`**, **`ffmpeg`** (for H.264 dwell video playback), and **WeasyPrint** system libraries (`libpango-1.0-0`, `libpangoft2-1.0-0`, `libharfbuzz-subset0`, `fonts-liberation` for PDF export).
 
 ```bash
 python3 -m venv .venv
@@ -499,7 +499,7 @@ data/
 </tr>
 <tr>
 <td><strong>System tools</strong></td>
-<td><code>curl</code>, <code>ffmpeg</code>, Pango/Cairo/GDK-Pixbuf, Liberation font</td>
+<td><code>curl</code>, <code>ffmpeg</code>, Pango, HarfBuzz subset, Liberation font</td>
 <td>Required for asset streaming, <code>mp4v</code>→H.264 video transcoding, and WeasyPrint PDF rendering (installed automatically in <a href="./Dockerfile"><code>Dockerfile</code></a>).</td>
 </tr>
 </tbody>

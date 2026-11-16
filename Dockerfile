@@ -15,19 +15,18 @@ RUN pnpm build
 
 FROM python:3.12-slim-bookworm
 
-# Pango, Cairo, and GDK-Pixbuf are what WeasyPrint draws with. Liberation is the
-# document font, so a missing glyph is not a silent fallback to another face.
+# curl resumes catalog downloads. ffmpeg transcodes dwell video to H.264.
+# WeasyPrint 63 and later draws with Pango and subsets fonts with HarfBuzz.
+# Cairo and the base HarfBuzz library are pulled in by these packages.
+# Liberation is the document font, so a missing glyph is not a silent fallback.
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
         curl \
         ffmpeg \
-        libcairo2 \
-        libgdk-pixbuf-2.0-0 \
-        libharfbuzz0b \
         libpango-1.0-0 \
         libpangoft2-1.0-0 \
+        libharfbuzz-subset0 \
         fonts-liberation \
-        shared-mime-info \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
