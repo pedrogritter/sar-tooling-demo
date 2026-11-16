@@ -185,7 +185,8 @@ Open **[http://127.0.0.1:8765](http://127.0.0.1:8765)**.
 On first start, `demo/build_seed.py` seeds the `/app/data` Docker volume with the committed Lisbon preview (`preview.png`, `graphic.png`), dwell video (`vid-mp4.mp4`), single-scene/dwell analyses, and `report.json`. The image does **not** bake in a GRD (~484 MB), SLC (~11 GB), colorized sub-aperture image (~1.2 GB), dwell stack (~827 MB), or quicklook COG — download those from the **Catalog** pane when you want to re-run measurements locally.
 
 - Reset the seeded volume at any time with `docker compose down -v`.
-- If `demo/lisbon/` is removed, `scene.demo` falls back to a drawn gray placeholder labeled with `demo.json` (which can be cleared from the header banner via **Clear demo data**).
+- The copied pack writes `demo.json` with `seeded` set. The header banner offers **Clear demo data**, which removes the preview, thumbnail, dwell video, analysis, and report, and leaves `stac.json`.
+- If `demo/lisbon/` is removed, `scene.demo` falls back to a drawn gray placeholder labeled with `demo.json` (`placeholder` set). That banner uses the same **Clear demo data** button.
 
 <a id="local-setup"></a>
 

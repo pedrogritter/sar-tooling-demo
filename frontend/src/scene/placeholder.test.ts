@@ -1,17 +1,29 @@
 import type { AnalysisTool } from "@/types"
 
 import {
+  demoBannerNote,
   demoBannerVisible,
   savedToolResult,
   summaryFromMeasurement,
 } from "@/scene/placeholder"
 
 describe("demo placeholder", () => {
-  it("shows the banner only for a placeholder scene", () => {
+  it("shows the banner for a placeholder or a copied demo pack", () => {
     expect(demoBannerVisible({ placeholder: true })).toBe(true)
+    expect(demoBannerVisible({ seeded: true })).toBe(true)
     expect(demoBannerVisible({ placeholder: false })).toBe(false)
     expect(demoBannerVisible(null)).toBe(false)
     expect(demoBannerVisible({})).toBe(false)
+  })
+
+  it("keeps the placeholder sentence distinct from the copied pack", () => {
+    expect(demoBannerNote({ placeholder: true, placeholder_note: "Drawn." })).toBe(
+      "Drawn."
+    )
+    expect(demoBannerNote({ seeded: true, seed_note: "Copied." })).toBe("Copied.")
+    expect(demoBannerNote({ placeholder: true, seed_note: "Copied." })).toContain(
+      "not measured"
+    )
   })
 
   it("fills the summary from a saved tool payload", () => {

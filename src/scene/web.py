@@ -34,6 +34,7 @@ from .demo import (
     clear_placeholder,
     note_from_folder,
     preview_file,
+    seed_note_from_folder,
 )
 from .downloads import (
     DownloadAlreadyRunningError,
@@ -282,7 +283,9 @@ def _scene_document(
     graphic = scene.asset("graphic")
     video = scene.asset("vid-mp4")
     scene_id = scene.scene_id
-    note = note_from_folder(scene_dir(scene_id))
+    folder = scene_dir(scene_id)
+    note = note_from_folder(folder)
+    seed_note = seed_note_from_folder(folder)
     return {
         "scene_id": scene_id,
         "collected_at": scene.collected_at,
@@ -311,6 +314,8 @@ def _scene_document(
         "is_test_scene": scene_id == LISBON_SCENE_ID,
         "placeholder": note is not None,
         "placeholder_note": note,
+        "seeded": seed_note is not None,
+        "seed_note": seed_note,
         "measurement": None,
         "briefing_html": None,
         "overview_url": None,

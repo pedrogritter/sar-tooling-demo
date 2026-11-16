@@ -2,15 +2,19 @@
 
 ``demo/lisbon`` is the committed source. When that tree holds ``stac.json``
 and ``preview.png``, and no radar raster, ``write_seed`` copies it into
-``demo/seed``. It does not draw the gray frame and it does not write
-``demo.json``. When that tree is missing, the pictures and numbers are drawn
-in this process. They are not an ICEYE raster and they are not a measurement.
-``seed_if_needed`` copies the seed when the Lisbon scene folder is missing
-or empty. A folder that already holds files is left alone, even when
-``stac.json`` is missing. Clearing the demo leaves ``stac.json``, so the next
-start does not put the pictures back. If that record is then removed and the
-folder is empty, the following start seeds again. A real download removes
-the placeholder only after it finishes.
+``demo/seed`` and writes ``demo.json`` with ``seeded`` set. That marker is
+not the drawn placeholder: the pictures and the analysis stay real
+measurements, and the page can still clear them. When that tree is missing,
+the pictures and numbers are drawn in this process. They are not an ICEYE
+raster and they are not a measurement, and ``demo.json`` then has
+``placeholder`` set. ``seed_if_needed`` copies the seed when the Lisbon
+scene folder is missing or empty. A folder that already holds files is left
+alone, even when ``stac.json`` is missing. A copied pack that is already on
+disk and has no marker yet receives the seeded marker on the next start.
+Clearing the demo leaves ``stac.json``, so the next start does not put the
+pictures back. If that record is then removed and the folder is empty, the
+following start seeds again. A real download removes the seeded files only
+after it finishes.
 """
 
 from __future__ import annotations
@@ -28,8 +32,14 @@ PLACEHOLDER_NOTE = (
     "Demo placeholder. These pictures and numbers were not measured "
     "from an ICEYE raster."
 )
+SEEDED_NOTE = (
+    "Demo data copied from the Lisbon pack. "
+    "The radar products are not in this folder."
+)
 SEED_MARKER = ".seed-applied"
 DEMO_FILE = "demo.json"
+# Files the seed may write. A download that replaces one of these keeps it.
+_SEED_FILES = ("qlk-cog.tif", "graphic.png", "preview.png", "vid-mp4.mp4")
 
 # Radar products. A committed seed that contains one of these is refused.
 _RASTER_NAMES = frozenset(
@@ -99,21 +109,26 @@ class SeedRasterError(Exception):
 
 
 def note_from_folder(folder: Path) -> str | None:
-    """The placeholder sentence, or None when this folder is a real scene."""
+    """The placeholder sentence, or None when this folder is not a drawing."""
 
-    path = folder / DEMO_FILE
-    if not path.is_file():
+    payload = _demo_payload(folder)
+    if payload is None or payload.get("placeholder") is not True:
         return None
-    try:
-        payload = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
+    return _note(payload, PLACEHOLDER_NOTE)
+
+
+def seed_note_from_folder(folder: Path) -> str | None:
+    """The seeded-pack sentence, or None when this folder is not that pack.
+
+    A drawn placeholder is not a seeded pack, even if both flags were set.
+    """
+
+    payload = _demo_payload(folder)
+    if payload is None or payload.get("placeholder") is True:
         return None
-    if not isinstance(payload, dict) or payload.get("placeholder") is not True:
+    if payload.get("seeded") is not True:
         return None
-    note = payload.get("note")
-    if isinstance(note, str) and note.strip():
-        return note.strip()
-    return PLACEHOLDER_NOTE
+    return _note(payload, SEEDED_NOTE)
 
 
 def seed_if_needed(data: Path | None = None, seed: Path | None = None) -> bool:
@@ -128,6 +143,8 @@ def seed_if_needed(data: Path | None = None, seed: Path | None = None) -> bool:
     root = data if data is not None else data_dir()
     folder = root / "scenes" / LISBON_SCENE_ID
     if (folder / "stac.json").is_file() or _occupied(folder):
+        # An older copy of the pack has the pictures and no marker.
+        _mark_existing_seed(folder)
         return False
     source = seed if seed is not None else seed_tree()
     origin = source / "scenes" / LISBON_SCENE_ID
@@ -149,11 +166,11 @@ def seed_tree() -> Path:
 
 
 def clear_placeholder(data: Path | None = None) -> str:
-    """Remove placeholder pictures and keep the STAC record.
+    """Remove seeded or placeholder pictures and keep the STAC record.
 
-    Raises PlaceholderMissing when no scene folder carries ``demo.json``.
-    Other scene folders are not deleted. The marker stays, so the next
-    start does not copy the pictures back.
+    Raises PlaceholderMissing when no scene folder carries a clearable
+    ``demo.json``. Other scene folders are not deleted. ``stac.json`` stays,
+    so the next start does not copy the pictures back.
     """
 
     root = data if data is not None else data_dir()
@@ -164,7 +181,7 @@ def clear_placeholder(data: Path | None = None) -> str:
         for child in sorted(scenes.iterdir()):
             if not child.is_dir():
                 continue
-            found = note_from_folder(child)
+            found = note_from_folder(child) or seed_note_from_folder(child)
             if found is None:
                 continue
             note = found
@@ -188,21 +205,9 @@ def strip_placeholder(
     is, which is also why a failed download must not call this.
     """
 
-    if note_from_folder(folder) is None:
+    if note_from_folder(folder) is None and seed_note_from_folder(folder) is None:
         return False
-    kept = set(replaced or ())
-    for name in ("qlk-cog.tif", "graphic.png"):
-        if name in kept:
-            continue
-        path = folder / name
-        if path.is_file():
-            path.unlink()
-    demo = folder / DEMO_FILE
-    if demo.is_file():
-        demo.unlink()
-    analysis = folder / "analysis"
-    if analysis.is_dir():
-        shutil.rmtree(analysis)
+    _remove_placeholder_payload(folder, kept=replaced)
     _write_marker(_data_root(folder), "replaced")
     return True
 
@@ -272,6 +277,7 @@ def _copy_committed(dest: Path, scene: Path) -> Path:
         shutil.rmtree(folder)
     folder.parent.mkdir(parents=True, exist_ok=True)
     shutil.copytree(scene, folder, ignore=shutil.ignore_patterns(DEMO_FILE))
+    _write_seed_marker(folder)
     return dest
 
 
@@ -333,19 +339,76 @@ def _data_root(folder: Path) -> Path:
     return scenes.parent
 
 
-def _remove_placeholder_payload(folder: Path) -> None:
-    """Delete the marker, the drawn pictures, and the analysis tree.
+def _remove_placeholder_payload(
+    folder: Path, kept: Collection[str] | None = None
+) -> None:
+    """Delete the marker and the files the seed wrote.
 
-    ``stac.json`` stays so the process can still load the scene.
+    ``stac.json`` and any radar product stay, so a download is not removed.
+    A name in ``kept`` was just written by that download and stays too.
     """
 
-    for name in (DEMO_FILE, "qlk-cog.tif", "graphic.png"):
+    skip = set(kept or ())
+    for name in (DEMO_FILE, *_SEED_FILES):
+        if name in skip:
+            continue
         path = folder / name
         if path.is_file():
             path.unlink()
-    analysis = folder / "analysis"
-    if analysis.is_dir():
-        shutil.rmtree(analysis)
+    for name in ("analysis", "report"):
+        path = folder / name
+        if path.is_dir():
+            shutil.rmtree(path)
+
+
+def _demo_payload(folder: Path) -> dict[str, object] | None:
+    """``demo.json`` when it is an object. A missing or broken file is None."""
+
+    path = folder / DEMO_FILE
+    if not path.is_file():
+        return None
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+    if not isinstance(payload, dict):
+        return None
+    return payload
+
+
+def _note(payload: dict[str, object], fallback: str) -> str:
+    note = payload.get("note")
+    if isinstance(note, str) and note.strip():
+        return note.strip()
+    return fallback
+
+
+def _write_seed_marker(folder: Path) -> None:
+    """Mark a copied Lisbon pack. This is not the drawn placeholder."""
+
+    folder.mkdir(parents=True, exist_ok=True)
+    (folder / DEMO_FILE).write_text(
+        json.dumps(
+            {"placeholder": False, "seeded": True, "note": SEEDED_NOTE},
+            indent=2,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+
+def _mark_existing_seed(folder: Path) -> None:
+    """Add the seeded marker to a pack that was copied before the marker existed.
+
+    A radar product in the folder means a download already landed, so the
+    pictures are left unmarked. A placeholder marker is also left as it is.
+    """
+
+    if not folder.is_dir() or _demo_payload(folder) is not None:
+        return
+    if preview_file(folder) is None or _raster_name(folder) is not None:
+        return
+    _write_seed_marker(folder)
 
 
 def _write_marker(root: Path, reason: str) -> None:

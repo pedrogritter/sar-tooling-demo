@@ -64,6 +64,8 @@ export interface SceneResponse {
   is_test_scene: boolean
   placeholder: boolean
   placeholder_note: string | null
+  seeded: boolean
+  seed_note: string | null
   measurement: Measurement | null
   briefing_html: string | null
   overview_url: string | null

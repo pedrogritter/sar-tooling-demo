@@ -14,6 +14,7 @@ from scene.demo import (
     clear_placeholder,
     note_from_folder,
     seed_if_needed,
+    seed_note_from_folder,
     write_seed,
 )
 from scene.library import list_library
@@ -203,14 +204,27 @@ class DemoSeedTest(unittest.TestCase):
             self.assertEqual((copied / "preview.png").read_bytes(), b"preview-bytes")
             self.assertEqual((copied / "graphic.png").read_bytes(), b"graphic-bytes")
             self.assertEqual((copied / "vid-mp4.mp4").read_bytes(), b"video-bytes")
-            self.assertFalse((copied / "demo.json").exists())
             self.assertIsNone(note_from_folder(copied))
+            self.assertIn("Lisbon pack", seed_note_from_folder(copied) or "")
+            marker = json.loads((copied / "demo.json").read_text(encoding="utf-8"))
+            self.assertFalse(marker["placeholder"])
+            self.assertTrue(marker["seeded"])
             self.assertFalse(any(path.suffix == ".tif" for path in copied.rglob("*")))
             listed = list_library(dest)
             self.assertEqual(
                 listed[0]["quicklook_url"],
                 f"/api/scenes/{LISBON_SCENE_ID}/quicklook.png",
             )
+            self.assertFalse(listed[0]["placeholder"])
+
+            note = clear_placeholder(dest)
+            self.assertIn("Lisbon pack", note)
+            self.assertTrue((copied / "stac.json").is_file())
+            self.assertFalse((copied / "preview.png").exists())
+            self.assertFalse((copied / "graphic.png").exists())
+            self.assertFalse((copied / "vid-mp4.mp4").exists())
+            self.assertFalse((copied / "demo.json").exists())
+            self.assertFalse(seed_if_needed(dest, dest))
 
     def test_committed_seed_rejects_a_radar_raster(self) -> None:
         with tempfile.TemporaryDirectory() as raw:
@@ -243,6 +257,31 @@ class DemoSeedTest(unittest.TestCase):
             )
             self.assertIsNone(listed[0]["thumbnail_url"])
             self.assertFalse(listed[0]["placeholder"])
+
+    def test_existing_preview_pack_gains_the_clear_marker(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            root = Path(raw)
+            data = root / "data"
+            folder = data / "scenes" / LISBON_SCENE_ID
+            folder.mkdir(parents=True)
+            (folder / "stac.json").write_text(
+                json.dumps(_collect(LISBON_SCENE_ID)), encoding="utf-8"
+            )
+            (folder / "preview.png").write_bytes(b"preview-bytes")
+            (folder / "report").mkdir()
+            (folder / "report" / "report.json").write_text("{}\n", encoding="utf-8")
+            (folder / "grd-cog.tif").write_bytes(b"keep-raster")
+            self.assertFalse(seed_if_needed(data, root / "missing-seed"))
+            self.assertFalse((folder / "demo.json").exists())
+            (folder / "grd-cog.tif").unlink()
+            self.assertFalse(seed_if_needed(data, root / "missing-seed"))
+            self.assertIsNotNone(seed_note_from_folder(folder))
+            self.assertEqual((folder / "preview.png").read_bytes(), b"preview-bytes")
+            clear_placeholder(data)
+            self.assertTrue((folder / "stac.json").is_file())
+            self.assertFalse((folder / "preview.png").exists())
+            self.assertFalse((folder / "report").exists())
+            self.assertFalse((folder / "demo.json").exists())
 
 
 def _collect(scene_id: str) -> dict[str, object]:

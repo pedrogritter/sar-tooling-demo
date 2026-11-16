@@ -1,10 +1,30 @@
 import type { AnalysisTool, JobResult, Measurement } from "@/types"
 
-/** The banner is shown only while the open scene is still the drawn placeholder. */
-export function demoBannerVisible(
-  scene: { placeholder?: boolean } | null
-): boolean {
-  return scene?.placeholder === true
+const PLACEHOLDER_FALLBACK =
+  "Demo placeholder. These pictures and numbers were not measured from an ICEYE raster."
+const SEEDED_FALLBACK =
+  "Demo data copied from the Lisbon pack. The radar products are not in this folder."
+
+interface DemoBannerScene {
+  placeholder?: boolean
+  placeholder_note?: string | null
+  seeded?: boolean
+  seed_note?: string | null
+}
+
+/** The banner is shown for a drawn placeholder or a copied Lisbon demo pack. */
+export function demoBannerVisible(scene: DemoBannerScene | null): boolean {
+  return scene?.placeholder === true || scene?.seeded === true
+}
+
+/** Sentence in the banner. A placeholder keeps its own wording. */
+export function demoBannerNote(scene: DemoBannerScene | null): string {
+  if (scene?.placeholder === true) {
+    const note = scene.placeholder_note?.trim()
+    return note || PLACEHOLDER_FALLBACK
+  }
+  const note = scene?.seed_note?.trim()
+  return note || SEEDED_FALLBACK
 }
 
 /** Picture, summary, and briefing already stored for a tool. */

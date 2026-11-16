@@ -16,7 +16,7 @@ import { ScrollArea } from "@/components/ui/scroll-area"
 import { useTheme } from "@/components/theme-provider"
 import { headerFactLine } from "@/lib/format"
 import { AnalysisPane } from "@/scene/AnalysisPane"
-import { demoBannerVisible } from "@/scene/placeholder"
+import { demoBannerNote, demoBannerVisible } from "@/scene/placeholder"
 import { ImageStage } from "@/scene/ImageStage"
 import { escapeClosesTool } from "@/scene/keyboard"
 import { MetadataOverlay } from "@/scene/MetadataOverlay"
@@ -344,8 +344,7 @@ export function ScenePage() {
       {demoBannerVisible(scene) ? (
         <div className="flex flex-wrap items-center gap-3 border-b bg-muted px-3 py-2">
           <p className="min-w-0 flex-1 text-sm">
-            {scene?.placeholder_note ??
-              "Demo placeholder. These pictures and numbers were not measured from an ICEYE raster."}
+            {demoBannerNote(scene)}
           </p>
           <Button
             type="button"

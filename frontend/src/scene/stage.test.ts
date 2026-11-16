@@ -21,6 +21,8 @@ const SCENE: SceneResponse = {
   is_test_scene: false,
   placeholder: false,
   placeholder_note: null,
+  seeded: false,
+  seed_note: null,
   measurement: null,
   briefing_html: null,
   overview_url: "/overview.png",
