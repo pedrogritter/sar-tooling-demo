@@ -67,7 +67,7 @@ interface ToolPickerProps {
   onSelect: (tool: ToolId) => void
 }
 
-/** Tool column. Scene tools stay on top. Measurement groups start collapsed. */
+/** Tool column. Scene tools stay on top, then a Tools heading. Measurement groups start collapsed. */
 export function ToolPicker({ selected, tools, onSelect }: ToolPickerProps) {
   const [opened, setOpened] = useState<string[]>([])
 
@@ -108,6 +108,13 @@ export function ToolPicker({ selected, tools, onSelect }: ToolPickerProps) {
           )
         })}
       </div>
+      <div
+        aria-hidden="true"
+        className="w-px shrink-0 bg-border md:h-px md:w-full"
+      />
+      <p className="shrink-0 px-1 pt-1 text-xs font-medium text-muted-foreground md:pt-2">
+        Tools
+      </p>
       {ANALYSIS_GROUPS.map((category) => {
         const open = isGroupOpen(category, selected, opened)
 
