@@ -9,6 +9,7 @@ from pathlib import Path
 
 from scene.library import list_library
 from scene.paths import LISBON_SCENE_ID
+from scene.places import OPEN_SEA, place_name
 
 
 class LibraryScanTest(unittest.TestCase):
@@ -50,12 +51,26 @@ class LibraryScanTest(unittest.TestCase):
         self.assertEqual(scenes[0]["assets_on_disk"], ["graphic"])
         self.assertIsNotNone(scenes[0]["thumbnail_url"])
         self.assertFalse(scenes[1]["is_test_scene"])
+        west, south, east, north = _BBOX
+        self.assertIn("place", scenes[0])
+        self.assertEqual(
+            scenes[0]["place"],
+            place_name((south + north) / 2, (west + east) / 2),
+        )
+        self.assertEqual(scenes[0]["place"], "Lisbon")
+        self.assertNotEqual(scenes[0]["place"], OPEN_SEA)
+        self.assertEqual(scenes[1]["place"], scenes[0]["place"])
+
+
+# West, south, east, north. The centre is the Lisbon point place_name knows.
+_BBOX = (-9.214, 38.660, -9.140, 38.718)
 
 
 def _item(scene_id: str, collected: str) -> dict[str, object]:
+    west, south, east, north = _BBOX
     return {
         "id": scene_id,
-        "bbox": [-9.214, 38.660, -9.140, 38.718],
+        "bbox": [west, south, east, north],
         "properties": {
             "datetime": collected,
             "start_datetime": collected,

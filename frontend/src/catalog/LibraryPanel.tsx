@@ -51,15 +51,16 @@ export function LibraryPanel({
                   onSelect(scene.scene_id)
                 }}
               >
+                <span className="block text-sm">{scene.place}</span>
+                <span className="block break-all font-mono text-[0.65rem] text-muted-foreground">
+                  {scene.scene_id}
+                </span>
                 <span className="flex flex-wrap items-center gap-1">
                   {scene.is_test_scene ? <Badge>Test scene</Badge> : null}
                   {scene.placeholder ? (
                     <Badge variant="outline">Demo data</Badge>
                   ) : null}
                   <Badge variant="outline">{scene.mode}</Badge>
-                </span>
-                <span className="font-mono text-[0.65rem] break-all">
-                  {scene.scene_id}
                 </span>
                 <span className="text-xs text-muted-foreground">
                   {formatUtc(scene.collected_at)} · {scene.platform}

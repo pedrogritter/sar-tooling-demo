@@ -11,6 +11,7 @@ from pathlib import Path
 from .demo import note_from_folder, preview_file
 from .loader import Asset, SceneDataError, SceneRecord, load_scene
 from .paths import LISBON_SCENE_ID, data_dir, valid_scene_id
+from .places import place_name
 
 
 def list_library(root: Path | None = None) -> list[dict[str, object]]:
@@ -53,8 +54,12 @@ def _entry(scene: SceneRecord, folder: Path) -> dict[str, object]:
         or preview_file(folder) is not None
         or _on_disk(graphic)
     )
+    # Same centre the catalog uses: midpoint of west, south, east, north.
+    box = scene.bbox
+    place = place_name((box.south + box.north) / 2, (box.west + box.east) / 2)
     return {
         "scene_id": scene_id,
+        "place": place,
         "collected_at": scene.collected_at,
         "platform": scene.platform,
         "mode": scene.mode,
