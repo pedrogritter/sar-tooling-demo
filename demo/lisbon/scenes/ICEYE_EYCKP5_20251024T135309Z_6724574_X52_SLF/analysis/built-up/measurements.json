@@ -5,11 +5,11 @@
   "summary": [
     {
       "label": "Built-up fraction of land",
-      "value": "0.092"
+      "value": "0.153"
     },
     {
       "label": "Clusters",
-      "value": "20"
+      "value": "473"
     }
   ],
   "limit": "Brightness is a double-bounce return. It is not a building height and it is not a residential or industrial class."
