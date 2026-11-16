@@ -24,7 +24,7 @@ from scene.paths import project_root
 from scene.report.facts import ReportFacts
 from scene.report.store import ReportSection
 
-MODEL_NAME = "gpt-4o-mini"
+MODEL_NAME = "gpt-6-luna"
 
 # Scene fields a prompt may name. Paths, rasters, and catalogue rows stay out.
 _SCENE_KEYS = (

@@ -247,7 +247,7 @@ The set is chosen in code, from the toolkit's lock state for the open scene:
 
 **One thread.** The report runs on the same measurement thread as the toolkit. Ordering happens there, so the page does not call a plan route. Tools run one at a time, in the order the model gave when that order is a permutation of the runnable ids. Otherwise the order is the toolkit catalog. A tool whose folder already has `measurements.json` is not measured again. Amplitude change reuses a result only for the same partner directory. A tool that raises becomes a `failed` section with a one-line reason, and the next tool still runs. A locked tool is not run. Starting a report while any measurement is running is a 409 with `{"status": "running"}`. A second run for the same scene replaces `report.json`. The files under `analysis/` stay.
 
-The model is `gpt-4o-mini`. None of the four calls receives a raster, a quicklook, or an overview image. A call that fails does not stop the run.
+The model is `gpt-6-luna`. None of the four calls receives a raster, a quicklook, or an overview image. A call that fails does not stop the run.
 
 1. **Order.** Temperature 0. The reply must use each runnable id once. A bad or failed reply falls back to toolkit catalog order.
 2. **Narrator.** When a key is set, one call at temperature 0.7 writes one or two humorous sentences about the tool that is running. It names the mode and does not state a measurement. Without a key, or when that call fails or is blank, the note is a plain sentence, such as "Measuring Open water on this spotlight scene." That line is the job sentence and the section `progress_note`, so the 400 ms poll can show it while the raster runs. It is not copied into the finished document or the PDF.
@@ -268,7 +268,7 @@ The guide may quote STAC fields, the glossary, the scene note, and tool limit se
 
 ### Guide chat
 
-A button fixed at the bottom right is labeled Ask. It opens a chat labeled Guide chat. The person can ask about a toolkit tool or about SAR. `POST /api/guide/chat` answers from the usage guide, `content/sar_glossary.md`, and `content/scene_note.md`. The model is `gpt-4o-mini` at temperature 0, and only when a key is set and the question is about this viewer or about SAR. An unrelated question does not call the model. The reply is "This chat answers questions about this viewer and about SAR. It does not answer that."
+A button fixed at the bottom right is labeled Ask. It opens a chat labeled Guide chat. The person can ask about a toolkit tool or about SAR. `POST /api/guide/chat` answers from the usage guide, `content/sar_glossary.md`, and `content/scene_note.md`. The model is `gpt-6-luna` at temperature 0, and only when a key is set and the question is about this viewer or about SAR. An unrelated question does not call the model. The reply is "This chat answers questions about this viewer and about SAR. It does not answer that."
 
 When the question matches a guide section, the reply asks "Open the {title} section?" and the panel shows a button. Yes, or that button, opens Documentation at that section. Without a key the reply is "Set an OpenAI key in Settings to ask a question." and the section button still appears. The chat does not run a tool and does not download a scene. It may not read a raster, name a vessel, match AIS, or drop a limit sentence. A bright mark stays a bright radar return. This chat is not the tool-choosing agent.
 

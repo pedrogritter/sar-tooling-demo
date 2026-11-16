@@ -21,7 +21,7 @@
 <p align="center">
   <img src="https://img.shields.io/badge/package%20manager-pnpm-F69220?style=flat&amp;labelColor=30363D&amp;logo=pnpm&amp;logoColor=white" alt="pnpm" />
   <img src="https://img.shields.io/badge/PDF-WeasyPrint-4F46E5?style=flat&amp;labelColor=30363D" alt="WeasyPrint PDF" />
-  <img src="https://img.shields.io/badge/LLM-gpt--4o--mini%20(optional)-18181B?style=flat&amp;labelColor=30363D" alt="Optional gpt-4o-mini" />
+  <img src="https://img.shields.io/badge/LLM-gpt--6--luna%20(optional)-18181B?style=flat&amp;labelColor=30363D" alt="Optional gpt-6-luna" />
   <img src="https://img.shields.io/badge/container-Docker%20Compose-2496ED?style=flat&amp;labelColor=30363D&amp;logo=docker&amp;logoColor=white" alt="Docker Compose" />
 </p>
 
@@ -60,7 +60,7 @@ The application boots from one public collect: **`ICEYE_EYCKP5_20251024T135309Z_
 Every view and measurement enforces strict epistemic boundaries:
 
 - **A bright mark is a bright radar return.** The viewer does not name a ship, match AIS, fuse another sensor, or claim that a model read the radar.
-- **No model reads pixels.** When `OPENAI_API_KEY` is provided (optional), `gpt-4o-mini` via LangChain only orders runnable tools, writes short progress lines, drafts a grounded report lead or section reading from `measurements.json` and [`content/sar_glossary.md`](./content/sar_glossary.md), or answers questions in Guide Chat. Every tool, report, and PDF works without a key.
+- **No model reads pixels.** When `OPENAI_API_KEY` is provided (optional), `gpt-6-luna` via LangChain only orders runnable tools, writes short progress lines, drafts a grounded report lead or section reading from `measurements.json` and [`content/sar_glossary.md`](./content/sar_glossary.md), or answers questions in Guide Chat. Every tool, report, and PDF works without a key.
 - **Every result carries its limit.** Each generated PNG carries its legend, and each briefing and report section retains the tool's limit sentence explaining what the number is *not*.
 
 <a id="core-capabilities"></a>
@@ -359,7 +359,7 @@ The tool column groups 15 measurements under **Surface**, **Objects**, **Motion*
 Choosing **Report** in the Scene column opens the report view. Choosing **Start** runs all eligible tools for the open scene (or, when an eligible Amplitude change partner is selected, single/motion tools + that partner's Amplitude change + all Stack tools across every matched date):
 
 1. **Deterministic tool selection:** Code chooses which tools are included and which remain `locked` sections.
-2. **Optional `gpt-4o-mini` calls (when `OPENAI_API_KEY` is set):**
+2. **Optional `gpt-6-luna` calls (when `OPENAI_API_KEY` is set):**
    - **Order** (temp `0`): proposes an execution permutation of runnable tool IDs (falls back to catalog order if invalid).
    - **Narrator** (temp `0.7`): writes 1–2 humorous progress sentences while a tool runs (falls back to a plain status sentence).
    - **Section reading** (temp `0`): after a `done` section saves, optionally writes `reading_md`. Replies mentioning `"ship"`, `"spill"`, `"tide height"`, or `"building height"`, or omitting the tool's limit sentence, are rejected and `briefing_md` stays unchanged.

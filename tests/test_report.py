@@ -516,8 +516,8 @@ class ChainsOrNoneTests(unittest.TestCase):
         self.assertEqual(
             chat.call_args_list,
             [
-                call(model="gpt-4o-mini", temperature=0),
-                call(model="gpt-4o-mini", temperature=0.7),
+                call(model="gpt-6-luna", temperature=0),
+                call(model="gpt-6-luna", temperature=0.7),
             ],
         )
 
@@ -555,8 +555,8 @@ class ChainsOrNoneTests(unittest.TestCase):
         self.assertEqual(
             chat.call_args_list,
             [
-                call(model="gpt-4o-mini", temperature=0),
-                call(model="gpt-4o-mini", temperature=0.7),
+                call(model="gpt-6-luna", temperature=0),
+                call(model="gpt-6-luna", temperature=0.7),
             ],
         )
 
