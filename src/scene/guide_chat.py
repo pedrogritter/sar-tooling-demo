@@ -82,8 +82,7 @@ class GuideChatError(ValueError):
 def model_or_none() -> GuideModel | None:
     """A temperature-0 chat when a key is set. Otherwise nothing."""
 
-    from scene.analyze import load_local_env
-    from scene.report.chains import MODEL_NAME
+    from scene.report.chains import MODEL_NAME, load_local_env
 
     load_local_env()
     if not os.environ.get("OPENAI_API_KEY", "").strip():

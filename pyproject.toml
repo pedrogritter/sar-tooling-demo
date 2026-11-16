@@ -24,9 +24,7 @@ python_version = "3.12"
 strict = true
 files = ["src/scene", "tests"]
 mypy_path = "src"
-# analyze.py is the measurement script. It stayed outside strict checking
-# when it lived at the repository root.
-exclude = ["data", "src/scene/analyze\\.py"]
+exclude = ["data"]
 
 [[tool.mypy.overrides]]
 module = "PIL.*"

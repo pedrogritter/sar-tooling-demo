@@ -214,7 +214,7 @@ class VideoRouteTest(unittest.TestCase):
             def transcode(src: Path, dest: Path) -> None:
                 dest.write_bytes(b"AVC-PLAYABLE")
 
-            manager = MeasurementJobManager(output_dir=folder)
+            manager = MeasurementJobManager()
             with (
                 patch("scene.web.scene_dir", lambda scene: root / "scenes" / scene),
                 patch("scene.playback.ffmpeg_transcode", transcode),

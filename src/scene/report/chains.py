@@ -20,7 +20,7 @@ from langchain_core.runnables import Runnable
 from langchain_openai import ChatOpenAI
 from pydantic import BaseModel
 
-from scene.analyze import load_local_env
+from scene.paths import project_root
 from scene.report.facts import ReportFacts
 from scene.report.store import ReportSection
 
@@ -167,6 +167,23 @@ class ReportChains:
 
 # A key typed on the page. It lives in this process and is never written out.
 _session_key: str | None = None
+
+
+def load_local_env() -> None:
+    """Read KEY=value lines from .env. An existing environment value wins."""
+
+    path = project_root() / ".env"
+    if not path.is_file():
+        return
+    for raw in path.read_text(encoding="utf-8").splitlines():
+        line = raw.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        name, value = line.split("=", 1)
+        name = name.strip().removeprefix("export ").strip()
+        value = value.strip().strip("'").strip('"')
+        if name and name not in os.environ:
+            os.environ[name] = value
 
 
 def model_key_source() -> str:

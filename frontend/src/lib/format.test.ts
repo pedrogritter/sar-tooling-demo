@@ -5,10 +5,7 @@ import {
   formatBbox,
   headerFactLine,
   formatFootprintSize,
-  formatMeasure,
-  formatPercent,
   formatUtc,
-  measurementNumber,
 } from "./format"
 
 const scene = {
@@ -46,25 +43,6 @@ describe("formatters", () => {
 
   it("prints a footprint size in kilometres", () => {
     expect(formatFootprintSize([-16.95, 28.0, -16.45, 28.5])).toBe("49 × 56 km")
-  })
-
-  it("prints a measurement with its unit", () => {
-    expect(formatMeasure(9.73, "km2")).toBe("9.73 km2")
-    expect(formatMeasure(27.8, "dB")).toBe("27.80 dB")
-    expect(formatMeasure(3, "px")).toBe("3 px")
-    expect(formatMeasure(Number.POSITIVE_INFINITY, "m")).toBe("not reported")
-    expect(formatMeasure(undefined, "m")).toBe("not reported")
-  })
-
-  it("prints a water fraction as a percent", () => {
-    expect(formatPercent(0.391)).toBe("39.1%")
-    expect(formatPercent(null)).toBe("not reported")
-  })
-
-  it("reads only finite measurement numbers", () => {
-    expect(measurementNumber({ water_km2: 9.73 }, "water_km2")).toBe(9.73)
-    expect(measurementNumber({ water_km2: Number.NaN }, "water_km2")).toBeNull()
-    expect(measurementNumber({}, "missing")).toBeNull()
   })
 
   it("lists the collect facts for a scene", () => {

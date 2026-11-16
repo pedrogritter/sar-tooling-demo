@@ -1,6 +1,6 @@
 # Application
 
-Last reviewed: 2026-11-15.
+Last reviewed: 2026-11-16.
 
 This file is the current description of the local ICEYE open-data viewer. Read it before changing a feature or deciding what the page may say. Update it in the same change when behavior, routes, constraints, or planned work change. Keep the claims as careful as the code.
 
@@ -20,13 +20,13 @@ The page may state:
 - On an empty data directory, the committed Lisbon preview, thumbnail, dwell video, and analysis results, when `demo/lisbon` is present. That tree has no GRD, SLC, colorized image, dwell stack, or quicklook COG. The drawn placeholder remains only when `demo/lisbon` is missing. The banner, the picture, and the briefing then say the numbers were not measured from an ICEYE raster. Those pictures are not a radar product.
 - The person-written note in `content/scene_note.md`, and only on the fallback Python page. The React page does not show that note.
 
-A bright mark is a bright radar return. The page does not name a ship, match AIS, fuse another sensor, or claim that a model read the radar. `python -m scene.analyze` calls `gpt-4o-mini` only when `OPENAI_API_KEY` is set, and that call may only phrase `measurements.json`. The toolkit never calls a model.
+A bright mark is a bright radar return. The page does not name a ship, match AIS, fuse another sensor, or claim that a model read the radar. The toolkit never calls a model.
 
 The catalogue in use is the public ICEYE open-data STAC collection, [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/). The commercial ICAS catalog is not called. Python here is this reader, this job, and this page. One container runs that same process. This checkout does not run in Kubernetes. A later pod sketch is under Future work. There is no air-gapped deploy and no second service depending on this process.
 
 ## Architecture
 
-One Python process serves the page and the API. The React app is a static build. Catalog indexing, one download, and one measurement each run as a background thread in that process. The toolkit and the Lisbon measurement share the measurement thread, so one blocks the other. There is no database. A scene is a folder of files.
+One Python process serves the page and the API. The React app is a static build. Catalog indexing, one download, and one measurement each run as a background thread in that process. The toolkit and the report share the measurement thread, so one blocks the other. There is no database. A scene is a folder of files.
 
 ```text
 browser
@@ -41,12 +41,11 @@ browser
         +-- library scan of data/scenes      (scene.library, scene.loader)
         +-- one measurement thread           (scene.jobs)
               +-- toolkit tool                  (scene.toolkit)
-              +-- Lisbon-only job            (scene.analyze)
               +-- scene report               (scene.report)
         +-- placeholder seed and clear       (scene.demo)
 ```
 
-`docker compose up --build` builds one image and publishes port 8765. The image holds Python 3.12, curl, ffmpeg, the package, `content/`, and `frontend/dist`. Node 26.13.0 builds the page. The image does not hold radar files, `intelligence/`, `.env`, or `OPENAI_API_KEY`. `docker compose up` copies the committed Lisbon preview, thumbnail, dwell video, and analysis results. It does not contain a GRD, an SLC, a colorized image, a dwell stack, or a quicklook COG. Compose passes that key from the shell or from a gitignored `.env` beside `docker-compose.yml` when one is set. An empty value counts as unset. A named volume is mounted at `/app/data`. `SCENE_HOST` is `0.0.0.0` inside the container. Before it listens, `scene.serve` calls `seed_if_needed`. `demo/build_seed.py` copies `demo/lisbon` into `demo/seed` during the image build, then the seed is copied into the volume. The drawn placeholder remains only when `demo/lisbon` is missing. The seed is not baked into `/app/data`, because the volume mount would hide it.
+`docker compose up --build` builds one image and publishes port 8765. The image holds Python 3.12, curl, ffmpeg, the package, `content/`, and `frontend/dist`. Node 26.13.0 builds the page. The image does not hold radar files, `.env`, or `OPENAI_API_KEY`. `docker compose up` copies the committed Lisbon preview, thumbnail, dwell video, and analysis results. It does not contain a GRD, an SLC, a colorized image, a dwell stack, or a quicklook COG. Compose passes that key from the shell or from a gitignored `.env` beside `docker-compose.yml` when one is set. An empty value counts as unset. A named volume is mounted at `/app/data`. `SCENE_HOST` is `0.0.0.0` inside the container. Before it listens, `scene.serve` calls `seed_if_needed`. `demo/build_seed.py` copies `demo/lisbon` into `demo/seed` during the image build, then the seed is copied into the volume. The drawn placeholder remains only when `demo/lisbon` is missing. The seed is not baked into `/app/data`, because the volume mount would hide it.
 
 Startup loads the Lisbon STAC item, the scene note, the fallback static files, and the Lisbon quicklook when `qlk-cog.tif` is present. Before it listens, startup logs whether `OPENAI_API_KEY` arrived from the environment or from `.env`. A missing or blank value logs that the key is unset and the process still boots. A non-blank value that contains a space, or is longer than 512 characters, is logged without the value and the process exits before it seeds or listens. Startup does not call the model. `GET /` then serves `frontend/dist/index.html` when that file exists. When the build is missing, the same route serves the original Python page: the quicklook, the STAC fields, and `content/scene_note.md`.
 
@@ -72,7 +71,6 @@ Startup loads the Lisbon STAC item, the scene note, the fallback static files, a
 | `content/scene_note.md` | Person-written note. The fallback page shows it. The usage guide may quote it. |
 | `content/sar_glossary.md` | The only extra wording the report lead may use. Toolkit limit sentences, and the terms already used for these tools. The usage guide quotes the same lines. |
 | `data/` | Gitignored. `data/scenes/<id>/` holds one downloaded item. `data/catalog-index.json` is the search cache. |
-| `intelligence/` | Output of the Lisbon-only measurement. `overview.png` is gitignored. |
 | `tests/` | Python tests (`unittest`). |
 | `docs/application.md` | This file. |
 
@@ -99,8 +97,6 @@ Asset filenames are `{stac-key}{suffix from the href}`, from `scene.naming`. Fet
 
 Single-scene tools, motion, and stack tools write under `analysis/<tool-id>/`. Only amplitude change adds the partner scene id as another directory. A stack still compares every matched scene. It stores one result on the scene that was open, with `partner_id` null.
 
-The Lisbon script is separate. It writes `intelligence/measurements.json`, `intelligence/returns.geojson`, `intelligence/overview.png`, and `intelligence/briefing.md`, and it reads only the Lisbon test scene.
-
 ### What a measurement reads
 
 Toolkit tools do not read the full raster. `scene.toolkit.raster` takes the COG overview whose long side is at most about 1600 pixels for a GRD, and about 1200 for a dwell stack. Sigma-nought is `calibration_factor * DN^2`, in decibels. The factor is read from `grd-json.json` (`iceye:calibration_factor`, `sar:calibration_factor`, or `calibration_factor`). The Lisbon scene has a hardcoded factor when that sidecar omits it. Areas use the ground size of those overview pixels, from `proj:transform` in the same sidecar.
@@ -114,9 +110,8 @@ The server is `ThreadingHTTPServer` from the standard library. It binds `127.0.0
 | Method and path | What it does |
 | --- | --- |
 | `GET /` | React app, or the fallback Python page. |
-| `GET /api/scene` | Original Lisbon contract. Always attaches `intelligence/` when those files exist. The React page does not call it. |
 | `GET /api/library` | Scenes whose `stac.json` this reader accepts. Broken folders are skipped. |
-| `GET /api/scenes/<id>` | One scene on disk. The `intelligence/` measurement is attached only for the test scene. The stage does not draw `/overview.png`. |
+| `GET /api/scenes/<id>` | One scene on disk. |
 | `GET /api/scenes/<id>/quicklook.png` | `qlk-cog.tif` rendered to a grayscale PNG, long edge at most 1600, cached by file mtime. When that COG is absent and `preview.png` is present, those PNG bytes are returned unchanged. The `graphic` file is served when neither is present. |
 | `GET /api/scenes/<id>/thumbnail` | The local `graphic` file. |
 | `GET /api/scenes/<id>/video` | The dwell video, as `video/mp4`, with `Accept-Ranges: bytes`. One `Range: bytes=start-end` header is a 206 with that slice. The stage still asks for `vid-mp4`. When that file's sample entry is `mp4v`, the bytes are a cached H.264 copy, `vid-mp4.mp4.avc.mp4`, written beside it. The downloaded `vid-mp4` stays. A failed transcode is 500 with `The dwell video could not be prepared for playback.` `vid-cog.tif` is not served here. |
@@ -130,10 +125,8 @@ The server is `ThreadingHTTPServer` from the standard library. It binds `127.0.0
 | `GET /api/report/key` | Whether this process has an OpenAI key. Body: `configured` and `source` (`unset`, `environment`, or `session`). The key is not returned. |
 | `POST /api/report/key` | Keep a key for this process only. Body: `api_key`. Nothing is written to disk. 409 when a key already arrived from the environment. 400 when the key is empty, contains spaces, or is longer than 512 characters. The response is the same status object as the GET, and it does not echo the key. |
 | `POST /api/jobs/run` | Start one toolkit tool. Body: `scene_id`, `tool_id`, optional `partner_id`, optional `controls`. Omitted control keys use the scene suggestion. An unknown key, or a number outside that tool's range, is 400 with `{"error": "..."}`. The report calls the same run with no overrides. |
-| `POST /api/jobs/measure` | Start the Lisbon-only measurement. Body must be empty. Same thread as `/api/jobs/run`. |
 | `GET /api/jobs/current` | That single job: idle, running, done, or failed, plus the step sentence and, when done, the measurement and briefing HTML. |
 | `GET /api/scenes/<id>/analysis/<tool>/overview.png` | A toolkit picture. Amplitude change inserts `/<partner>` before `overview.png`. |
-| `GET /overview.png` | `intelligence/overview.png` for the Lisbon job. |
 | `GET /quicklook.png` | Rendered quicklook of the Lisbon scene loaded at startup. |
 | `GET /static/scene.css`, `GET /static/scene.js` | Fallback page assets, loaded into memory at startup. |
 | `GET /api/catalog/search` | Filter the cached collection. See Catalog below. |
@@ -144,7 +137,7 @@ The server is `ThreadingHTTPServer` from the standard library. It binds `127.0.0
 | `GET /api/downloads/current` | The single download and a byte count per file. |
 | `POST /client-error` | Browser `error` and `unhandledrejection` events. Logged, not stored. Returns 204. |
 
-A second measurement or a second download returns 409. A report run is a measurement, so it shares that lock with the toolkit and the Lisbon job. Unknown paths return a short plain-text error. POST requires `Content-Length`, except `/api/jobs/measure`, `/api/catalog/refresh`, and `/api/demo/clear`, which may be empty. Bodies over 16 KiB are rejected, and a client-error body over 2 KiB is rejected.
+A second measurement or a second download returns 409. A report run is a measurement, so it shares that lock with the toolkit. Unknown paths return a short plain-text error. POST requires `Content-Length`, except `/api/catalog/refresh` and `/api/demo/clear`, which may be empty. Bodies over 16 KiB are rejected, and a client-error body over 2 KiB is rejected.
 
 Hashed files under `frontend/dist` are cached for a year. `index.html` is `no-store`.
 
@@ -152,17 +145,15 @@ Hashed files under `frontend/dist` are cached for a year. `index.html` is `no-st
 
 `frontend/src/App.tsx` renders one `ScenePage`. The shell is a header, a tool column, a stage, one right-hand pane, and a download dock along the bottom. The browser tab is titled SAR Toolkit. The tab icon is `/radar.svg`, the Lucide Radar glyph on a rounded tile. Light mode is a near-black tile and a near-white stroke. Dark mode, from `prefers-color-scheme`, is a near-white tile and a near-black stroke. The icon is decoration. It does not depict a detection or a named vessel. The header puts the radar mark and the name Open data on the left. The center is labeled Selected scene: "25 de Abril bridge" for the test scene and the scene id otherwise, then the collected time, platform, mode, band, and polarization. That facts line opens the metadata card. The card starts closed. The tool column lists Scene (Preview, Catalog, Library, Report, Documentation), then a divider and a Tools heading, then the measurement groups. The divider is a vertical rule on a narrow row and a horizontal rule in the desktop column. Choosing Documentation replaces the stage with the usage guide. Close and Escape return to the picture. A group is a disclosure with a chevron, not a tool. Groups stay collapsed until opened, and the group that holds the selected tool stays open. Each measurement has its own icon. A locked tool stays clickable and shows a lock; the pane still names the missing file. The pane starts closed. On a narrow viewport the column scrolls sideways and the pane stacks under the stage. Choosing the open tool, Close, or Escape shuts the pane. Escape is ignored while focus is in a field. Opening a scene from the catalog or the library closes the pane. A Settings button beside the theme control opens a modal. The modal sets an OpenAI key for this process through `POST /api/report/key`. The key is not written to disk and is not echoed. A key that arrived from the environment keeps the field hidden. Restarting the process clears a key entered in the modal. Host, port, and catalogue URLs stay out of the modal. Escape closes the tool pane only when that modal is closed and focus is not in a field.
 
-The stage shows the quicklook, thumbnail, or dwell video. A toolkit picture replaces that preview only when the selected tool produced it and the URL contains `/analysis/<that-tool>/`. The Lisbon `/overview.png` is not that picture.
+The stage shows the quicklook, thumbnail, or dwell video. A toolkit picture replaces that preview only when the selected tool produced it and the URL contains `/analysis/<that-tool>/`.
 
 The React page loads the library, then opens the test scene, or the first library row when the test scene is absent. It polls a running download and a running measurement every 400 ms. While the catalog index is still filling, the catalog pane polls every 2 seconds. When the open scene has `demo.json`, a banner under the header repeats the placeholder sentence and offers Clear demo data. That button calls `POST /api/demo/clear` and reloads the scene. It does not run on the first click anywhere else.
 
 UI kit: React 19, Vite, Tailwind 4, Base UI, and the local `components/ui` primitives. Icons are Lucide. The default theme is dark. Imports inside `frontend/src` use the `@/` alias.
 
-### Two measurement paths
+### Measurement
 
 The toolkit (`scene.toolkit`) is the path the tool column runs. It works for any scene on disk whose files and geometry the tool accepts. Output stays in that scene's `analysis/` folder. The briefing is markdown rendered from the summary rows and the limit sentence. The toolkit does not call a model. Only the scene report, below, does, and it keeps the toolkit briefing as its fallback.
-
-`scene.analyze` is the older Lisbon job. It needs the GRD and the dwell stack for the 25 de Abril collect, optionally reads the colorized sub-aperture image as a second vote, and records the SLC sidecar without detecting on it. `POST /api/jobs/measure` still starts it. `ResultsSection` and `use-measure-job` are still in `frontend/src/scene` and are not mounted by `ScenePage`. `fetchScene` (`GET /api/scene`) is also unused by the page. It remains covered by `frontend/src/api.test.ts`.
 
 ## Features
 
@@ -281,11 +272,9 @@ A button fixed at the bottom right is labeled Ask. It opens a chat labeled Guide
 
 When the question matches a guide section, the reply asks "Open the {title} section?" and the panel shows a button. Yes, or that button, opens Documentation at that section. Without a key the reply is "Set an OpenAI key in Settings to ask a question." and the section button still appears. The chat does not run a tool and does not download a scene. It may not read a raster, name a vessel, match AIS, or drop a limit sentence. A bright mark stays a bright radar return. This chat is not the tool-choosing agent.
 
-### Fallback page and the Lisbon briefing
+### Fallback page
 
 With no `frontend/dist/index.html`, `GET /` renders the Python page from `scene.page`. That page shows the quicklook, the STAC fields, which assets are on disk, and `content/scene_note.md`. It states that no detector has run. It has no question box.
-
-`python -m scene.analyze` writes the Lisbon briefing. With `OPENAI_API_KEY` unset, the prose is rendered from `measurements.json`. With the key set, in the environment or in a gitignored `.env`, an existing environment value wins over `.env`. The request uses `gpt-4o-mini` at temperature 0. Raw DN values are removed before the call. The prompt may use only numbers present in the JSON, and it may not name a ship or a bridge.
 
 ## Development
 
@@ -315,7 +304,7 @@ Runtime Python dependencies are numpy, Pillow, scipy, tifffile, and imagecodecs.
 | --- | --- | --- |
 | `SCENE_HOST` | `127.0.0.1` | Address `scene.serve` binds. |
 | `SCENE_PORT` | `8765` | Port. Must be an integer from 1 to 65535. |
-| `OPENAI_API_KEY` | unset | Optional. Compose passes the shell value, or the value in a gitignored `.env` beside `docker-compose.yml`. The Settings modal can also set it for the running process, and that value is not written to disk. A blank value counts as unset and the process still boots. A non-blank value that contains a space, or is longer than 512 characters, stops startup before listen. The log names that problem and does not include the value. The image build does not receive the key. Startup does not call the model. The report uses LangChain to order tools and write the lead when a key is set, and a toolkit lead when it is not. A key writes a short humorous progress note. Without a key the note is a plain sentence. Without a key, Start still measures. The code chooses which tools run. `scene.analyze` uses it to phrase `measurements.json`. |
+| `OPENAI_API_KEY` | unset | Optional. Compose passes the shell value, or the value in a gitignored `.env` beside `docker-compose.yml`. The Settings modal can also set it for the running process, and that value is not written to disk. A blank value counts as unset and the process still boots. A non-blank value that contains a space, or is longer than 512 characters, stops startup before listen. The log names that problem and does not include the value. The image build does not receive the key. Startup does not call the model. The report uses LangChain to order tools and write the lead when a key is set, and a toolkit lead when it is not. A key writes a short humorous progress note. Without a key the note is a plain sentence. Without a key, Start still measures. The code chooses which tools run. |
 
 The Lisbon catalogue URL is the constant `STAC_URL` in `src/scene/fetch.py`. The open-data collection URL is `COLLECTION_URL` in `src/scene/catalog.py`.
 
@@ -331,7 +320,7 @@ pnpm --dir frontend typecheck
 pnpm --dir frontend test
 ```
 
-Ruff selects E, F, I, and UP, line length 88. mypy is strict on `src/scene` and `tests`, and it excludes `src/scene/analyze.py`. Frontend tests are Jest. There is no Cypress suite in this repository. Do not start `pnpm dev` for a product check. The page under test is the Python process serving `frontend/dist`.
+Ruff selects E, F, I, and UP, line length 88. mypy is strict on `src/scene` and `tests`. Frontend tests are Jest. There is no Cypress suite in this repository. Do not start `pnpm dev` for a product check. The page under test is the Python process serving `frontend/dist`.
 
 ### Troubleshooting
 
@@ -350,9 +339,8 @@ Ruff selects E, F, I, and UP, line length 88. mypy is strict on `src/scene` and 
 | Catalog text finds nothing you can see in the row | The box matches the scene id only. Place and mode are not searched. |
 | Catalog search is empty for a bbox | The index may still be reading item JSON. `unread_for_bbox` counts rows that passed the other filters and still have no footprint. |
 | Download sits on one large file | curl is streaming it. The dock byte count is the file size on disk. One download runs at a time. |
-| `POST /api/jobs/run`, `/api/jobs/measure`, or `/api/downloads` returns 409 | That kind of job is already running. The two measurement routes share one thread. |
+| `POST /api/jobs/run` or `/api/downloads` returns 409 | That kind of job is already running. A report run shares the measurement thread with the toolkit. |
 | The picture is back and the numbers are not | The tool folder has `overview.png` and no `measurements.json`. A folder that has both reloads the summary and the briefing with the picture. |
-| Lisbon measurement fails at once | `scene.analyze` requires `grd-cog.tif` and `vid-cog.tif` in the Lisbon scene folder. Fetch them with `--all`. |
 | Browser error with no UI message | The page posts it to `/client-error`. The server log line is `browser error message=… source=…`. |
 | A scene folder never appears in the library | It needs a `stac.json` this loader accepts, and a scene id that is a single safe path segment. A required STAC field of the wrong type drops the folder. |
 
@@ -364,7 +352,7 @@ A model in any of the items below may phrase measurements, STAC fields, the scen
 
 ### Queued
 
-- [ ] Decide the Lisbon measurement. `POST /api/jobs/measure` and `scene.analyze` still run, and `ResultsSection`, `use-measure-job`, and `fetchScene` are unused by `ScenePage`. Either mount that result on the test scene or retire the unused UI.
+- [x] Retire the Lisbon measurement. `scene.analyze`, `POST /api/jobs/measure`, and `GET /api/scene` are gone. The toolkit and the report are the measurement.
 - [x] Date of change states a departure of at least 3 dB in a patch of at least 8 pixels, matching the measurement.
 - [x] The pane uses the toolkit names: Built-up return, Returns on water, Long structure, Dwell motion, Amplitude change, Water persistence, and Dark sea anomaly.
 
@@ -399,7 +387,7 @@ A model in any of the items below may phrase measurements, STAC fields, the scen
 
 ### Architecture
 
-- [ ] Read the process as it is now and write down where the layout disagrees with itself: two measurement paths, a fallback page beside the React page, and code the page no longer mounts. Propose a smaller distribution of modules only where the current split hides a responsibility. Delete code that nothing calls. Leave `POST /api/jobs/measure` and `scene.analyze` until the queued Lisbon decision says to mount that result or retire it. A cleanup does not change what a tool may claim.
+- [ ] Read the process as it is now and write down where the layout disagrees with itself: a fallback page beside the React page. Propose a smaller distribution of modules only where the current split hides a responsibility. Delete code that nothing calls. A cleanup does not change what a tool may claim.
 
 ### Frontend performance
 
@@ -411,7 +399,7 @@ A model in any of the items below may phrase measurements, STAC fields, the scen
 
 ### README
 
-- [x] `README.md` is written so a first visit can see what this is, why it exists, how to run it, and where the careful claims live. It keeps the technical sheet: Python 3.12, pnpm, Docker, the port, the optional key, and the test commands. It has the shape a public repository is expected to have: a short description, the status, the data licence, and a pointer to `docs/application.md`. The tone is plain and lively. Three HTML comments name screenshots to capture later, and each one is also a centered line on the page so the slot is visible before the image exists. It still says the radar files are not in git, that no code licence is declared, and that a bright mark is a bright radar return. This file stays the memory. The README does not copy it. See the opening above.
+- [x] `README.md` is written so a first visit can see what this is, why it exists, how to run it, and where the careful claims live. It keeps the technical sheet: Python 3.12, pnpm, Docker, the port, the optional key, and the test commands. It has the shape a public repository is expected to have: a short description, the status, the data licence, and a pointer to `docs/application.md`. The tone is plain and lively. It shows the committed Lisbon preview and toolkit pictures in `demo/lisbon`. It still says the radar files are not in git, that no code licence is declared, and that a bright mark is a bright radar return. This file stays the memory. The README does not copy it. See the opening above.
 
 ### Analyst-facing tools
 
@@ -419,7 +407,7 @@ A model in any of the items below may phrase measurements, STAC fields, the scen
 
 ### One report per scene
 
-- [x] Start writes one report for the open scene. The code chooses the tools. A locked tool in that set, including a locked stack or stack mean when a second scene was chosen, is a section with the toolkit's lock sentence and is not run. Change and stack stay out, lock lines included, until a partner is chosen. On this bridge they stay locked because the open catalog has no second look. The report uses LangChain to order tools and write the lead when a key is set, and a toolkit lead when it is not. A key writes a short humorous progress note. Without a key the note is a plain sentence. The page does not ask a question. The PDF is WeasyPrint. A bright return stays a bright radar return. The prose may not name a ship, a spill, a tide height, or a building height. See Scene report above. The Lisbon files in `intelligence/` stay the older single-scene job.
+- [x] Start writes one report for the open scene. The code chooses the tools. A locked tool in that set, including a locked stack or stack mean when a second scene was chosen, is a section with the toolkit's lock sentence and is not run. Change and stack stay out, lock lines included, until a partner is chosen. On this bridge they stay locked because the open catalog has no second look. The report uses LangChain to order tools and write the lead when a key is set, and a toolkit lead when it is not. A key writes a short humorous progress note. Without a key the note is a plain sentence. The page does not ask a question. The PDF is WeasyPrint. A bright return stays a bright radar return. The prose may not name a ship, a spill, a tide height, or a building height. See Scene report above.
 
 ### LangChain pipeline
 
@@ -445,7 +433,7 @@ This checkout is one process with job state in memory and scenes on a local disk
 A first pod is that same process, one replica:
 
 - The image from `Dockerfile`. `SCENE_HOST=0.0.0.0`, container port 8765, a Service in front of it.
-- A PersistentVolumeClaim mounted at `data/`. The catalog cache and scene folders live there. `ReadWriteOnce` is enough for one pod. An empty volume is seeded before the process listens. `intelligence/` is not in the image.
+- A PersistentVolumeClaim mounted at `data/`. The catalog cache and scene folders live there. `ReadWriteOnce` is enough for one pod. An empty volume is seeded before the process listens.
 - The scene note and the static fallback files are in the image. After the seed, the Lisbon `stac.json` is on the volume. Without the seed and without that file, the pod is not ready.
 - `OPENAI_API_KEY` comes from a Secret when the pipeline exists. The image does not contain it.
 - No Ingress change is required for a local cluster. A later Ingress terminates TLS and leaves the pod speaking plain HTTP on 8765.
@@ -457,6 +445,6 @@ A grid of pods is a later split, and it needs a queue this repository does not h
 | Web | The current server: the page, catalog search, library, and download. One replica until download progress also leaves this process. |
 | Index | The catalog enricher, if it is lifted out of the web process. Writes `catalog-index.json` on the shared volume. |
 | Measure | One toolkit run per pod. Reads scene folders, writes `analysis/`. The web pod records the job as running. The 409 lock moves from a thread to the queue. |
-| Brief | Optional. Reads `measurements.json` only, writes the briefing. Same claim limits as `scene.analyze`. |
+| Brief | Optional. Reads `measurements.json` only, writes the briefing. Same claim limits as the report. |
 
 Measure pods need a shared filesystem (`ReadWriteMany`) or an object store in place of `data/scenes`. They do not need the React build. The web pod does not need scipy once measurement has moved. Until that split exists, run one pod. Horizontal pod autoscaling on the current server would multiply in-memory jobs and corrupt the single-download assumption.

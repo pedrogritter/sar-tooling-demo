@@ -4,7 +4,7 @@ data/
 # Generated placeholder tree. The container builds it, then copies it into data/.
 demo/seed/
 
-# Rendered radar overview. The small measurement files stay with the code.
+# Local overview image. Stays on this machine.
 intelligence/overview.png
 
 # Secrets. The model key is read from the environment or from this file.

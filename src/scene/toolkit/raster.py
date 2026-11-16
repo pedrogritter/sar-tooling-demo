@@ -116,12 +116,6 @@ def sigma0_db(dn: np.ndarray, factor: float) -> np.ndarray:
     return quiet
 
 
-def relative_db(dn: np.ndarray) -> np.ndarray:
-    """Decibels of DN^2, for a display that must not be called sigma-nought."""
-
-    return sigma0_db(dn, 1.0)
-
-
 def pixel_metres(grid: Grid, scale: float) -> tuple[float, float]:
     """Ground size of one overview pixel, as (column metres, row metres)."""
 

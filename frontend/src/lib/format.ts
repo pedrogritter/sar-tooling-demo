@@ -1,12 +1,4 @@
-import type { BoundingBox, Measurement, SceneResponse } from "@/types"
-
-const FRACTION_DIGITS: Record<string, number> = {
-  dB: 2,
-  km2: 2,
-  m: 1,
-  m2: 1,
-  "m/s": 2,
-}
+import type { BoundingBox, SceneResponse } from "@/types"
 
 export interface Fact {
   label: string
@@ -86,23 +78,6 @@ export function formatBbox([west, south, east, north]: BoundingBox): string {
   return `${formatCoordinate(west)}, ${formatCoordinate(south)}, ${formatCoordinate(east)}, ${formatCoordinate(north)}`
 }
 
-export function formatMeasure(
-  value: number | null | undefined,
-  unit: string
-): string {
-  if (typeof value !== "number" || !Number.isFinite(value)) {
-    return "not reported"
-  }
-
-  const digits = FRACTION_DIGITS[unit] ?? 1
-  const formatted = new Intl.NumberFormat("en", {
-    maximumFractionDigits: digits,
-    minimumFractionDigits: unit === "dB" ? 2 : 0,
-  }).format(value)
-
-  return `${formatted} ${unit}`
-}
-
 export function formatBytes(value: number | null | undefined): string {
   if (typeof value !== "number" || !Number.isFinite(value) || value < 0) {
     return "size unknown"
@@ -121,25 +96,6 @@ export function formatBytes(value: number | null | undefined): string {
   }
 
   return `${(value / 1_000_000_000).toFixed(2)} GB`
-}
-
-export function formatPercent(value: number | null | undefined): string {
-  if (typeof value !== "number" || !Number.isFinite(value)) {
-    return "not reported"
-  }
-
-  return new Intl.NumberFormat("en", {
-    style: "percent",
-    maximumFractionDigits: 1,
-  }).format(value)
-}
-
-export function measurementNumber(
-  measurement: Measurement,
-  key: string
-): number | null {
-  const value = measurement[key]
-  return typeof value === "number" && Number.isFinite(value) ? value : null
 }
 
 const HEADER_FACT_LABELS = [

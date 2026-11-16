@@ -36,10 +36,6 @@ export class MeasureJobConflictError extends ApiError {
   }
 }
 
-export async function fetchScene(): Promise<SceneResponse> {
-  return requestJson<SceneResponse>("/api/scene")
-}
-
 export async function fetchGuide(): Promise<{
   sections: {
     id: string
@@ -78,20 +74,6 @@ export async function sendGuideChat(
       pending_section_id: pendingSectionId,
     }),
   })
-}
-
-export async function startMeasureJob(): Promise<MeasureJobAccepted> {
-  try {
-    return await requestJson<MeasureJobAccepted>("/api/jobs/measure", {
-      method: "POST",
-    })
-  } catch (error) {
-    if (error instanceof ApiError && error.status === 409) {
-      throw new MeasureJobConflictError()
-    }
-
-    throw error
-  }
 }
 
 export async function fetchCurrentJob(): Promise<JobSnapshot> {

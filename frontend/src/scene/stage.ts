@@ -23,7 +23,6 @@ export interface StageView {
 
 /**
  * The analysis picture replaces the quicklook only when this tool wrote it.
- * The Lisbon measurement's `/overview.png` is not that picture.
  */
 export function stageFor(
   tool: ToolId | null,

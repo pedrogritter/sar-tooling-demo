@@ -5,7 +5,6 @@ from __future__ import annotations
 import json
 import os
 import unittest
-from pathlib import Path
 from unittest.mock import patch
 
 from scene.guide_chat import GuideChatError, answer_guide_chat, model_or_none
@@ -142,14 +141,14 @@ class GuideChatTest(unittest.TestCase):
     def test_a_blank_environment_builds_no_model(self) -> None:
         with (
             patch.dict(os.environ, {"OPENAI_API_KEY": ""}, clear=False),
-            patch("scene.analyze.load_local_env"),
+            patch("scene.report.chains.load_local_env"),
         ):
             self.assertIsNone(model_or_none())
 
 
 class GuideChatRouteTest(unittest.TestCase):
     def test_post_returns_the_refusal_and_get_is_not_found(self) -> None:
-        manager = MeasurementJobManager(output_dir=Path("/tmp"))
+        manager = MeasurementJobManager()
         body = json.dumps({"message": OFF_TOPIC}).encode()
         got = dispatch(
             "POST",

@@ -12,7 +12,6 @@ from pathlib import Path
 from typing import Literal
 
 from .markdown import render_markdown
-from .paths import intelligence_dir
 
 JobStatus = Literal["idle", "running", "done", "failed"]
 OnStep = Callable[[int, str], None]
@@ -62,13 +61,7 @@ class JobSnapshot:
 class MeasurementJobManager:
     """Own the single measurement worker thread and its visible status."""
 
-    def __init__(
-        self,
-        runner: MeasurementRunner | None = None,
-        output_dir: Path | None = None,
-    ) -> None:
-        self.output_dir = output_dir or default_output_dir()
-        self._runner = runner or _default_runner
+    def __init__(self) -> None:
         self._lock = threading.Lock()
         self._thread: threading.Thread | None = None
         self._job_id: str | None = None
@@ -79,12 +72,9 @@ class MeasurementJobManager:
         self._result: JobResult | None = None
         # None means the finished job publishes no result (report jobs).
         self._result_dir: Path | None = None
-        self._overview_url = "/overview.png"
+        self._overview_url = ""
         self._step_count = STEP_COUNT
-        self._active_runner: MeasurementRunner = self._runner
-
-    def start(self) -> str:
-        return self._begin(self._runner, self.output_dir, "/overview.png", STEP_COUNT)
+        self._active_runner: MeasurementRunner = lambda _on_step: None
 
     def start_analysis(
         self,
@@ -96,7 +86,7 @@ class MeasurementJobManager:
         step_count: int,
         controls: dict[str, float] | None = None,
     ) -> str:
-        """Run one toolkit tool. The Lisbon measurement keeps ``start``."""
+        """Run one toolkit tool on the shared measurement thread."""
 
         def runner(on_step: OnStep) -> None:
             module = importlib.import_module("scene.toolkit.run")
@@ -163,9 +153,6 @@ class MeasurementJobManager:
                 result=self._result,
             )
 
-    def disk_result(self) -> JobResult:
-        return read_job_result(self.output_dir)
-
     def _run(self, job_id: str) -> None:
         def on_step(index: int, sentence: str) -> None:
             with self._lock:
@@ -200,18 +187,11 @@ class MeasurementJobManager:
             self._result = result
 
 
-def default_output_dir() -> Path:
-    return intelligence_dir()
-
-
-def read_job_result(
-    output_dir: Path | None = None, overview_url: str = "/overview.png"
-) -> JobResult:
-    directory = output_dir or default_output_dir()
-    ready = (directory / "overview.png").is_file()
+def read_job_result(output_dir: Path, overview_url: str) -> JobResult:
+    ready = (output_dir / "overview.png").is_file()
     return JobResult(
-        measurement=_read_measurement(directory / "measurements.json"),
-        briefing_html=_read_briefing(directory / "briefing.md"),
+        measurement=_read_measurement(output_dir / "measurements.json"),
+        briefing_html=_read_briefing(output_dir / "briefing.md"),
         overview_url=overview_url if ready else None,
     )
 
@@ -224,14 +204,6 @@ def default_manager() -> MeasurementJobManager:
     if _DEFAULT_MANAGER is None:
         _DEFAULT_MANAGER = MeasurementJobManager()
     return _DEFAULT_MANAGER
-
-
-def _default_runner(on_step: OnStep) -> None:
-    module = importlib.import_module("scene.analyze")
-    runner = getattr(module, "run_measurement")
-    if not callable(runner):
-        raise RuntimeError("scene.analyze.run_measurement is not callable")
-    runner(on_step)
 
 
 def _read_measurement(path: Path) -> object | None:

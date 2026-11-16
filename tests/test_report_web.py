@@ -128,7 +128,7 @@ class WebBase(unittest.TestCase):
         self.root = Path(tmp.name)
         (self.root / "scenes" / SCENE).mkdir(parents=True)
         (self.root / "scenes" / SCENE / "stac.json").write_text("{}", "utf-8")
-        self.manager = MeasurementJobManager(output_dir=self.root / "out")
+        self.manager = MeasurementJobManager()
         self.state: AppState = None  # type: ignore[assignment]
         self.views = _default_views()
         self.ran: list[tuple[str, str | None]] = []

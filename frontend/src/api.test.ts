@@ -4,14 +4,12 @@ import {
   fetchCurrentJob,
   fetchGuide,
   fetchModelKey,
-  fetchScene,
   isReportKeyRequiredError,
   reportPdfUrl,
   saveModelKey,
   sendGuideChat,
   startAnalysisJob,
   startReportRun,
-  startMeasureJob,
 } from "@/api"
 
 function jsonResponse(body: unknown, status = 200): Response {
@@ -27,13 +25,6 @@ describe("scene api", () => {
   beforeEach(() => {
     fetchMock.mockReset()
     global.fetch = fetchMock as typeof fetch
-  })
-
-  it("loads the scene document", async () => {
-    fetchMock.mockResolvedValue(jsonResponse({ scene_id: "ICEYE" }))
-
-    await expect(fetchScene()).resolves.toEqual({ scene_id: "ICEYE" })
-    expect(fetchMock).toHaveBeenCalledWith("/api/scene", undefined)
   })
 
   it("loads the usage guide", async () => {
@@ -147,20 +138,6 @@ describe("scene api", () => {
     ).rejects.toBeInstanceOf(MeasureJobConflictError)
   })
 
-  it("turns HTTP 409 into a conflict error", async () => {
-    fetchMock.mockResolvedValue(jsonResponse({ status: "running" }, 409))
-
-    await expect(startMeasureJob()).rejects.toBeInstanceOf(
-      MeasureJobConflictError
-    )
-  })
-
-  it("rethrows other start failures", async () => {
-    fetchMock.mockResolvedValue(jsonResponse({ error: "missing grd" }, 400))
-
-    await expect(startMeasureJob()).rejects.toThrow("missing grd")
-  })
-
   it("uses the error string from a JSON body", async () => {
     fetchMock.mockResolvedValue(jsonResponse({ error: "missing grd" }, 500))
 
@@ -173,19 +150,19 @@ describe("scene api", () => {
   it("uses a message field when error is absent", async () => {
     fetchMock.mockResolvedValue(jsonResponse({ message: "busy" }, 503))
 
-    await expect(fetchScene()).rejects.toThrow("busy")
+    await expect(fetchGuide()).rejects.toThrow("busy")
   })
 
   it("falls back when the body is not JSON", async () => {
     fetchMock.mockResolvedValue(new Response("nope", { status: 502 }))
 
-    await expect(fetchScene()).rejects.toThrow("Request failed with status 502")
+    await expect(fetchGuide()).rejects.toThrow("Request failed with status 502")
   })
 
   it("falls back when the JSON body has no message", async () => {
     fetchMock.mockResolvedValue(jsonResponse({ status: "no" }, 400))
 
-    await expect(fetchScene()).rejects.toThrow("Request failed with status 400")
+    await expect(fetchGuide()).rejects.toThrow("Request failed with status 400")
   })
 })
 

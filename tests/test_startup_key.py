@@ -26,7 +26,7 @@ class StartupKeyStatusTests(unittest.TestCase):
             if env_text is not None:
                 (root / ".env").write_text(env_text, encoding="utf-8")
             with (
-                patch("scene.analyze.project_root", return_value=root),
+                patch("scene.report.chains.project_root", return_value=root),
                 patch.dict(os.environ, environ, clear=True),
             ):
                 yield
@@ -95,7 +95,7 @@ class AnnounceModelKeyTests(unittest.TestCase):
             if env_text is not None:
                 (root / ".env").write_text(env_text, encoding="utf-8")
             with (
-                patch("scene.analyze.project_root", return_value=root),
+                patch("scene.report.chains.project_root", return_value=root),
                 patch.dict(os.environ, environ, clear=True),
             ):
                 yield

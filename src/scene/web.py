@@ -178,15 +178,8 @@ def dispatch(
             None if quicklook is None else quicklook.height,
         )
         return HttpResponse(200, "text/html; charset=utf-8", page.encode("utf-8"))
-    if method == "GET" and path == "/api/scene":
-        return _json(200, _scene_payload(state, manager))
     if method == "GET" and path == "/api/jobs/current":
         return _json(200, manager.current().to_public())
-    if method == "GET" and path == "/overview.png":
-        overview = manager.output_dir / "overview.png"
-        if not overview.is_file():
-            return _plain(404, "Overview is not on disk")
-        return _file_response(overview, "image/png")
     if method == "GET" and path == "/quicklook.png":
         if state.quicklook is None:
             return _plain(404, f"Quicklook is not on disk. Run {FETCH_COMMAND}")
@@ -198,14 +191,6 @@ def dispatch(
         dist_response = _dist_asset_response(path)
         if dist_response is not None:
             return dist_response
-    if method == "POST" and path == "/api/jobs/measure":
-        if body:
-            return _plain(400, "Measure job request body must be empty")
-        try:
-            job_id = manager.start()
-        except JobAlreadyRunningError:
-            return _json(409, {"status": "running"})
-        return _json(202, {"job_id": job_id, "status": "running"})
     if method == "POST" and path == "/client-error":
         return _accept_client_error(body)
     if method not in {"GET", "POST", "HEAD"}:
@@ -289,27 +274,11 @@ def _accept_client_error(body: bytes) -> HttpResponse:
     return HttpResponse(204, "text/plain; charset=utf-8", b"")
 
 
-def _scene_payload(
-    state: AppState, job_manager: MeasurementJobManager
-) -> dict[str, object]:
-    preview = "/quicklook.png" if state.quicklook is not None else None
-    # /api/scene keeps the original contract: measurement comes from the
-    # Lisbon intelligence directory even when the loaded record is a fixture.
-    return _scene_document(state.scene, job_manager, preview, include_measurement=True)
-
-
 def _scene_document(
     scene: SceneRecord,
-    job_manager: MeasurementJobManager,
     preview_url: str | None,
-    include_measurement: bool,
 ) -> dict[str, object]:
     bbox = scene.bbox
-    result = (
-        job_manager.disk_result().to_public()
-        if include_measurement
-        else {"measurement": None, "briefing_html": None, "overview_url": None}
-    )
     graphic = scene.asset("graphic")
     video = scene.asset("vid-mp4")
     scene_id = scene.scene_id
@@ -342,9 +311,9 @@ def _scene_document(
         "is_test_scene": scene_id == LISBON_SCENE_ID,
         "placeholder": note is not None,
         "placeholder_note": note,
-        "measurement": result["measurement"],
-        "briefing_html": result["briefing_html"],
-        "overview_url": result["overview_url"],
+        "measurement": None,
+        "briefing_html": None,
+        "overview_url": None,
     }
 
 
@@ -415,7 +384,6 @@ def _dispatch_workspace(
         return _scene_route(
             scene_match.group("scene_id"),
             scene_match.group("leaf"),
-            manager,
             range_header,
         )
     return None
@@ -802,7 +770,6 @@ def _catalog_item(
 def _scene_route(
     scene_id: str,
     leaf: str | None,
-    manager: MeasurementJobManager,
     range_header: str | None = None,
 ) -> HttpResponse:
     if not valid_scene_id(scene_id):
@@ -841,10 +808,10 @@ def _scene_route(
         return _file_response(
             playable, "video/mp4", range_header=range_header
         )
-    return _scene_json(scene_id, manager)
+    return _scene_json(scene_id)
 
 
-def _scene_json(scene_id: str, manager: MeasurementJobManager) -> HttpResponse:
+def _scene_json(scene_id: str) -> HttpResponse:
     scene = _read_local_scene(scene_id)
     if isinstance(scene, HttpResponse):
         return scene
@@ -855,15 +822,7 @@ def _scene_json(scene_id: str, manager: MeasurementJobManager) -> HttpResponse:
         graphic is not None and graphic.on_disk
     ):
         preview = f"/api/scenes/{scene_id}/quicklook.png"
-    return _json(
-        200,
-        _scene_document(
-            scene,
-            manager,
-            preview,
-            include_measurement=scene.scene_id == LISBON_SCENE_ID,
-        ),
-    )
+    return _json(200, _scene_document(scene, preview))
 
 
 def _scene_quicklook(scene_id: str) -> HttpResponse:
@@ -1199,7 +1158,6 @@ def make_handler(
             if raw is None:
                 path = urlsplit(target).path
                 if path in {
-                    "/api/jobs/measure",
                     "/api/catalog/refresh",
                     "/api/demo/clear",
                 }:

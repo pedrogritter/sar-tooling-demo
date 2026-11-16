@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import json
 import unittest
-from pathlib import Path
 
 from scene.guide import guide_payload
 from scene.jobs import MeasurementJobManager
@@ -263,7 +262,7 @@ class GuidePayloadTest(unittest.TestCase):
 
 class GuideRouteTest(unittest.TestCase):
     def test_get_returns_the_guide_and_post_is_not_found(self) -> None:
-        manager = MeasurementJobManager(output_dir=Path("/tmp"))
+        manager = MeasurementJobManager()
         got = dispatch(
             "GET",
             "/api/guide",

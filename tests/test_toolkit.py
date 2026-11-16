@@ -693,7 +693,7 @@ class LongStructureAxisTest(unittest.TestCase):
         self.assertLess(structure.length_m, 750.0)
 
 
-# Stored deck line from intelligence/returns.geojson. South end, then north end.
+# Deck line on the Lisbon collect. South end, then north end.
 _STORED_DECK = (
     (-9.174131929401266, 38.68104102292412),
     (-9.17888681141543, 38.70161252161052),

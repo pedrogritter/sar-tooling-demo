@@ -207,8 +207,7 @@ Open **[http://127.0.0.1:8765](http://127.0.0.1:8765)**.
 
 - `.venv/bin/python -m scene.fetch` downloads the Lisbon preview pack (`stac.json`, `graphic`, `qlk-cog`, `qlk-json`, `vid-mp4`). Add `--all` to stream the full rasters (`grd-cog`, `csi-cog`, `vid-cog`, `slc-cog`, and JSON sidecars). Files already matching remote size are skipped, and `curl` resumes partial transfers.
 - Note that the preview pack omits `grd-json.json` and `grd-cog.tif`, so toolkit measurements stay locked until those are downloaded (either via `--all` or the **Catalog** checklist in the UI).
-- **Do not use `pnpm dev`** for verifying the application: the Python server (`scene.serve`) serves the built static bundle from `frontend/dist/`. If `frontend/dist/index.html` is absent, `GET /` falls back to the original Python HTML page showing the quicklook, STAC fields, and [`content/scene_note.md`](./content/scene_note.md).
-- **Legacy Lisbon script:** `.venv/bin/python -m scene.analyze` runs the older Lisbon-only job (requiring `grd-cog.tif` and `vid-cog.tif`) and writes `intelligence/measurements.json`, `intelligence/returns.geojson`, `intelligence/overview.png`, and `intelligence/briefing.md`. The main web interface uses `scene.toolkit` and `scene.report` instead.
+- **Do not use `pnpm dev`** for verifying the application: the Python server (`scene.serve`) serves the built static bundle from `frontend/dist/`. If `frontend/dist/index.html` is absent, `GET /` falls back to the original Python HTML page showing the quicklook, STAC fields, and [`content/scene_note.md`](./content/scene_note.md). The web interface measures with `scene.toolkit` and `scene.report`.
 
 <a id="configuration"></a>
 
@@ -396,7 +395,7 @@ flowchart TD
     CAT["Catalog &amp; Places<br/>4-worker STAC enricher + Natural Earth"]
     DL["Download Thread<br/>Single curl job (scene.downloads)"]
     LIB["Library &amp; Media<br/>quicklook PNG + H.264 transcode"]
-    JOB["Single Measurement Lock<br/>scene.toolkit · scene.report · scene.analyze"]
+    JOB["Single Measurement Lock<br/>scene.toolkit · scene.report"]
   end
 
   DISK["Local Disk (data/)<br/>catalog-index.json · scenes/&lt;id&gt;/"]
@@ -419,7 +418,7 @@ flowchart TD
   class DISK store
 ```
 
-- **Shared measurement lock:** Toolkit runs, report generation, and `scene.analyze` share one measurement thread and return `409 {"status": "running"}` if a second measurement is requested concurrently.
+- **Shared measurement lock:** Toolkit runs and report generation share one measurement thread and return `409 {"status": "running"}` if a second measurement is requested concurrently.
 - **Single download lock:** Only one download runs at a time; progress reflects bytes written by `curl` on disk.
 - **Client error logging:** Browser `error` and `unhandledrejection` events post to `POST /client-error` and are logged on the server.
 - **Safety boundaries:** Scene IDs are validated against `[A-Za-z0-9_-]+`; the server never serves `data/` by arbitrary caller paths, and catalog thumbnails are proxied only from allowlisted `iceye-open-data-catalog` S3 hosts.
@@ -450,13 +449,13 @@ data/
 | --- | --- |
 | `GET /` | Serves `frontend/dist/index.html` (`no-store`), or fallback `scene.page` HTML when the React build is absent. |
 | `GET /api/library` | Lists valid scenes on disk under `data/scenes/*/stac.json` with Natural Earth place labels. |
-| `GET /api/scenes/<id>` | Scene metadata and asset status (`intelligence/` attached only for the Lisbon test scene). |
+| `GET /api/scenes/<id>` | Scene metadata and asset status. |
 | `GET /api/scenes/<id>/quicklook.png` | Renders `qlk-cog.tif` (≤1600 px, cached by mtime), or serves `preview.png` / `graphic` when absent. |
 | `GET /api/scenes/<id>/thumbnail` | Local `graphic` file. |
 | `GET /api/scenes/<id>/video` | Dwell video (`video/mp4`) with `Accept-Ranges: bytes` (`206` slices), transcoding `mp4v` to H.264 on demand. |
 | `GET /api/scenes/<id>/tools` | All 15 toolkit tools with lock reasons, eligible partners, saved results, and scene-suggested `controls`. |
 | `GET /api/scenes/<id>/analysis/<tool>/overview.png` | Rendered toolkit overview PNG (inserts `/<partner>` for `amplitude-change`). |
-| `POST /api/jobs/run`, `POST /api/jobs/measure`, `GET /api/jobs/current` | Start a toolkit run or Lisbon-only `scene.analyze` job, or poll current measurement status. |
+| `POST /api/jobs/run`, `GET /api/jobs/current` | Start a toolkit run, or poll current measurement status. |
 | `POST /api/scenes/<id>/report/run`, `GET .../report`, `GET .../report.pdf` | Start a report job, poll incremental `report.json`, or download the WeasyPrint A4 PDF. |
 | `GET /api/report/key`, `POST /api/report/key` | Inspect key source (`unset`, `environment`, `session`) or set an in-memory key for the running process. |
 | `GET /api/catalog/search`, `POST /api/catalog/refresh`, `GET /api/catalog/items/<id>`, `GET .../thumbnail` | Search cached catalog (`limit` 1–100, default 24), clear cache, inspect item sizes, or proxy thumbnails. |
@@ -545,7 +544,7 @@ pnpm --dir frontend build
 ```
 
 - Ruff enforces `E`, `F`, `I`, and `UP` at line length `88`.
-- `mypy` runs in `strict` mode on `src/scene` and `tests` (excluding `src/scene/analyze.py`).
+- `mypy` runs in `strict` mode on `src/scene` and `tests`.
 - Python PDF tests mock the WeasyPrint writer, so running the test suite locally does not require Pango/Cairo unless generating real PDFs.
 
 ### Troubleshooting

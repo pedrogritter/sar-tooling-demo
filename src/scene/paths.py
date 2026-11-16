@@ -14,7 +14,7 @@ from pathlib import Path
 # every scene checkout.
 FETCH_COMMAND = "python -m scene.fetch"
 
-# The bridge measurement in analyze.py describes this collect only.
+# The 25 de Abril test scene. Other open-data scenes can sit beside it.
 LISBON_SCENE_ID = "ICEYE_EYCKP5_20251024T135309Z_6724574_X52_SLF"
 
 # Scene ids become directory names. Reject anything that could leave data/.
@@ -63,10 +63,6 @@ def catalog_index_path() -> Path:
     return data_dir() / "catalog-index.json"
 
 
-def intelligence_dir() -> Path:
-    return project_root() / "intelligence"
-
-
 def scene_note_path() -> Path:
     return project_root() / "content" / "scene_note.md"
 
@@ -75,7 +71,3 @@ def static_dir() -> Path:
     """Fallback page assets packaged with the Python viewer."""
 
     return Path(__file__).resolve().parent / "static"
-
-
-def frontend_dist_dir() -> Path:
-    return project_root() / "frontend" / "dist"
