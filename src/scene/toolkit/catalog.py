@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 import json
+import math
 from dataclasses import dataclass
 from pathlib import Path
 
 from scene.demo import note_from_folder
+from scene.grid import Grid
 from scene.jobs import read_job_result
 from scene.loader import SceneDataError, load_scene
 from scene.paths import scene_dir, valid_scene_id
@@ -18,7 +20,8 @@ from .geometry import (
     can_pair,
     is_calibrated_mode,
 )
-from .raster import calibration_factor, read_json
+from .measure import control_payloads
+from .raster import calibration_factor, load_amplitude, pixel_metres, read_json
 
 STACK_MIN = 2
 STACK_MEAN_MIN = 5
@@ -157,6 +160,7 @@ class ToolView:
     overview_url: str | None
     measurement: object | None
     briefing_html: str | None
+    controls: tuple[dict[str, object], ...] = ()
 
     def to_public(self) -> dict[str, object]:
         return {
@@ -171,6 +175,7 @@ class ToolView:
             "overview_url": self.overview_url,
             "measurement": self.measurement,
             "briefing_html": self.briefing_html,
+            "controls": [dict(item) for item in self.controls],
         }
 
 
@@ -189,6 +194,8 @@ def tools_for_scene(scene_id: str) -> list[ToolView]:
     matches = tuple(item.scene_id for item in others if can_pair(current, item))
     views: list[ToolView] = []
     note = note_from_folder(scene_dir(scene_id))
+    incidence = current.incidence if math.isfinite(current.incidence) else None
+    pixel_m = _overview_pixel_m(scene_id)
     for spec in TOOLS:
         locked, reason = _lock(spec, current, matches)
         if locked and note:
@@ -210,6 +217,7 @@ def tools_for_scene(scene_id: str) -> list[ToolView]:
                 overview_url=_overview_url(scene_id, spec.id),
                 measurement=saved[0],
                 briefing_html=saved[1],
+                controls=control_payloads(spec.id, incidence, pixel_m),
             )
         )
     return views
@@ -379,6 +387,50 @@ def _collect(scene_id: str) -> Collect:
         has_vid=vid is not None and vid.on_disk,
         calibrated=calibrated,
     )
+
+
+def scene_gates(scene_id: str) -> tuple[float | None, float | None]:
+    """Incidence in degrees and the smaller overview pixel in metres.
+
+    Either is None when the scene does not say. A missing raster does not
+    raise: the suggestion then keeps the catalog default.
+    """
+
+    incidence: float | None = None
+    try:
+        incidence = _collect(scene_id).incidence
+    except (OSError, SceneDataError, RuntimeError, KeyError, ValueError):
+        incidence = None
+    if incidence is not None and not math.isfinite(incidence):
+        incidence = None
+    return incidence, _overview_pixel_m(scene_id)
+
+
+def _overview_pixel_m(scene_id: str) -> float | None:
+    """Smaller ground size of one overview pixel. None when it cannot be read."""
+
+    folder = scene_dir(scene_id)
+    raster = folder / "grd-cog.tif"
+    sidecar = folder / "grd-json.json"
+    if not raster.is_file() or not sidecar.is_file():
+        return None
+    try:
+        properties = read_json(sidecar).get("properties")
+        transform = (
+            properties.get("proj:transform") if isinstance(properties, dict) else None
+        )
+        if not isinstance(transform, list) or len(transform) < 6:
+            return None
+        _amplitude, scale = load_amplitude(raster)
+        col_m, row_m = pixel_metres(
+            Grid.from_transform([float(value) for value in transform[:6]]), scale
+        )
+    except (OSError, RuntimeError, ValueError, TypeError, KeyError):
+        return None
+    pixel = min(col_m, row_m)
+    if not math.isfinite(pixel) or pixel <= 0:
+        return None
+    return pixel
 
 
 def _factor(folder: Path, scene_id: str) -> float | None:

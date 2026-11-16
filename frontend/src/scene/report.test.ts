@@ -100,8 +100,8 @@ describe("normalizeReport", () => {
           tool_id: "open-water",
           status: "done",
           measurement: null,
-          briefing_md: "Belt text.",
-          briefing_source: "belt",
+          briefing_md: "Toolkit text.",
+          briefing_source: "toolkit",
           overview_url: null,
           partner_id: null,
         },
@@ -113,13 +113,13 @@ describe("normalizeReport", () => {
     expect(saved.partner_id).toBeNull()
     expect(saved.tool_order).toEqual(["open-water"])
     expect(saved.synthesis_md).toBe("")
-    expect(saved.synthesis_source).toBe("belt")
+    expect(saved.synthesis_source).toBe("toolkit")
     expect(saved.sections[0]?.progress_note).toBe("")
     expect(saved.sections[0]?.reading_md).toBe("")
-    expect(saved.sections[0]?.briefing_md).toBe("Belt text.")
+    expect(saved.sections[0]?.briefing_md).toBe("Toolkit text.")
   })
 
-  it("keeps a reading and leaves the belt briefing unchanged", () => {
+  it("keeps a reading and leaves the toolkit briefing unchanged", () => {
     const saved = normalizeReport({
       scene_id: "S",
       sections: [
@@ -127,16 +127,16 @@ describe("normalizeReport", () => {
           tool_id: "open-water",
           status: "done",
           measurement: null,
-          briefing_md: "Belt text.",
-          briefing_source: "belt",
+          briefing_md: "Toolkit text.",
+          briefing_source: "toolkit",
           reading_md: "A reading of the dark water.",
         },
       ],
     })
 
     expect(saved.sections[0]?.reading_md).toBe("A reading of the dark water.")
-    expect(saved.sections[0]?.briefing_md).toBe("Belt text.")
-    expect(saved.sections[0]?.briefing_source).toBe("belt")
+    expect(saved.sections[0]?.briefing_md).toBe("Toolkit text.")
+    expect(saved.sections[0]?.briefing_source).toBe("toolkit")
   })
 
   it("treats an empty older file as a finished report with nothing to show", () => {
@@ -369,7 +369,7 @@ describe("figureViews", () => {
     expect(JSON.stringify(figures)).not.toContain("A joke")
   })
 
-  it("uses the reading when it has text and the belt briefing otherwise", () => {
+  it("uses the reading when it has text and the toolkit briefing otherwise", () => {
     const figures = figureViews(
       report({
         tool_order: ["open-water", "built-up"],
@@ -377,12 +377,12 @@ describe("figureViews", () => {
           section({
             tool_id: "open-water",
             reading_md: "A reading of the dark water.",
-            briefing_md: "Belt text for the water.",
+            briefing_md: "Toolkit text for the water.",
           }),
           section({
             tool_id: "built-up",
             reading_md: "   ",
-            briefing_md: "Belt text for the clusters.",
+            briefing_md: "Toolkit text for the clusters.",
           }),
         ],
       })
@@ -390,7 +390,7 @@ describe("figureViews", () => {
 
     expect(figures.map((figure) => [figure.toolId, figure.prose])).toEqual([
       ["open-water", "A reading of the dark water."],
-      ["built-up", "Belt text for the clusters."],
+      ["built-up", "Toolkit text for the clusters."],
     ])
     expect(figures[0]?.limit).toBe(
       "A bright return stays a bright radar return."
@@ -491,7 +491,7 @@ describe("shouldLoadReport", () => {
 })
 
 describe("toolLabel", () => {
-  it("names a tool from the belt list and falls back to its id", () => {
+  it("names a tool from the toolkit list and falls back to its id", () => {
     expect(toolLabel("open-water")).toBe("Open water")
     expect(toolLabel("not-a-tool")).toBe("not-a-tool")
   })

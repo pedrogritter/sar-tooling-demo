@@ -1,6 +1,6 @@
 # SAR glossary
 
-The report reading may use this file as its only extra wording. The lines below are the belt's own limit sentences and the terms already used for these tools. A jargon word stays with the plain hint on the same line.
+The report reading may use this file as its only extra wording. The lines below are the toolkit's own limit sentences and the terms already used for these tools. A jargon word stays with the plain hint on the same line.
 
 ## Terms
 
@@ -13,7 +13,7 @@ The report reading may use this file as its only extra wording. The lines below 
 - Double-bounce is the bright return built-up reports. Brightness is a double-bounce return. It is not a building height and it is not a residential or industrial class.
 - A bright return stays a bright radar return. The label stays bright return. A hull, a pier, and a platform all qualify.
 
-## Belt limits
+## Toolkit limits
 
 - Open water. Shadow, tarmac, and sand are dark for the same reason. Flooded vegetation and flooded streets get brighter, so this mask marks them dry.
 - Sea roughness. This split is roughness, not a wave period, a wave height, or a current.

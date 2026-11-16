@@ -13,7 +13,8 @@ interface AnalysisJobState {
   start: (
     sceneId: string,
     toolId: string,
-    partnerId: string | null
+    partnerId: string | null,
+    controls: Record<string, number>
   ) => Promise<void>
 }
 
@@ -81,12 +82,17 @@ export function useAnalysisJob(
   }, [load, snapshot])
 
   const start = useCallback(
-    async (sceneId: string, toolId: string, partnerId: string | null) => {
+    async (
+      sceneId: string,
+      toolId: string,
+      partnerId: string | null,
+      controls: Record<string, number>
+    ) => {
       setIsStarting(true)
       setStartError(null)
 
       try {
-        await startAnalysisJob(sceneId, toolId, partnerId)
+        await startAnalysisJob(sceneId, toolId, partnerId, controls)
         sawRunning.current = true
         await load()
       } catch (error) {

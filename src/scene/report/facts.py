@@ -1,7 +1,7 @@
 """Facts about the open scene that a report may state without running a tool.
 
 Everything here is read from files already on disk: the scene folder, the
-belt's tool locks, and the local catalogue index. Nothing opens a socket.
+toolkit's tool locks, and the local catalogue index. Nothing opens a socket.
 """
 
 from __future__ import annotations
@@ -11,18 +11,18 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
-from scene.belt.catalog import _collect, tools_for_scene
-from scene.belt.geometry import (
+from scene.catalog import CatalogRecord, _records_from_disk
+from scene.grid import Grid
+from scene.loader import load_scene
+from scene.paths import catalog_index_path, scene_dir
+from scene.toolkit.catalog import _collect, tools_for_scene
+from scene.toolkit.geometry import (
     MIN_OVERLAP,
     Collect,
     overlap_fraction,
     same_look,
 )
-from scene.belt.raster import load_amplitude, pixel_metres, read_json
-from scene.catalog import CatalogRecord, _records_from_disk
-from scene.grid import Grid
-from scene.loader import load_scene
-from scene.paths import catalog_index_path, scene_dir
+from scene.toolkit.raster import load_amplitude, pixel_metres, read_json
 
 
 @dataclass(frozen=True)

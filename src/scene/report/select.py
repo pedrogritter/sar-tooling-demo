@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from scene.belt.catalog import ToolView, tool_spec, tools_for_scene
+from scene.toolkit.catalog import ToolView, tool_spec, tools_for_scene
 
 # The one pair tool. It runs only when the request names an eligible partner.
 AMPLITUDE_TOOL = "amplitude-change"
@@ -23,7 +23,7 @@ class IneligiblePartner(Exception):
 
 @dataclass(frozen=True)
 class IncludedTool:
-    """One tool the report will measure, or list with the belt lock sentence."""
+    """One tool the report will measure, or list with the toolkit lock sentence."""
 
     id: str
     label: str
@@ -35,7 +35,7 @@ class IncludedTool:
 
 @dataclass(frozen=True)
 class ToolSet:
-    """The tools for one run, in belt catalog order.
+    """The tools for one run, in toolkit catalog order.
 
     ``matched_dates`` counts the open scene plus every matched scene an
     unlocked stack tool will compare. It is None when no stack tool runs.
@@ -59,9 +59,9 @@ def choose_tools(scene_id: str, partner_id: str | None) -> ToolSet:
     ones included as lock lines. Change and stack tools are left out entirely,
     including their lock lines. With a partner from the amplitude-change list,
     the set adds that comparison and every stack tool. A locked stack tool,
-    including stack mean, is a section with the belt's lock sentence and is
+    including stack mean, is a section with the toolkit's lock sentence and is
     not run. ``matched_dates`` counts only a stack tool that will run. A
-    partner the belt does not list, or a locked comparison, raises
+    partner the toolkit does not list, or a locked comparison, raises
     ``IneligiblePartner``. Catalogue scenes are never fetched.
     """
 
@@ -89,7 +89,7 @@ def choose_tools(scene_id: str, partner_id: str | None) -> ToolSet:
 
 
 def nothing_runnable_sentence(chosen: ToolSet) -> str:
-    """Why Start should not open a job. The belt's own reason when it gave one."""
+    """Why Start should not open a job. The toolkit's own reason when it gave one."""
 
     reason = next((tool.reason for tool in chosen.tools if tool.reason), "")
     lead = "No tool can run for this scene."

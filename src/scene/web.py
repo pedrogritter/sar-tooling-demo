@@ -20,8 +20,6 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 from urllib.parse import parse_qs, unquote, urlsplit
 
-from .belt.catalog import analysis_dir, tools_for_scene
-from .belt.run import step_sentences
 from .catalog import (
     PREVIEW_KEYS,
     CatalogError,
@@ -67,6 +65,9 @@ from .report.pdf import build_pdf
 from .report.run import FallbackModel, ReportModel, run_report
 from .report.select import IneligiblePartner, choose_tools, nothing_runnable_sentence
 from .report.store import Report, ReportStore
+from .toolkit.catalog import analysis_dir, tools_for_scene
+from .toolkit.measure import ControlError, parse_control_overrides
+from .toolkit.run import step_sentences
 
 if TYPE_CHECKING:
     from .quicklook import QuicklookImage
@@ -575,7 +576,7 @@ def _run_report(
 ) -> HttpResponse:
     """Choose the tool set in code, then start the run on the measurement thread.
 
-    The body is ``partner_id`` null, or one scene id. A partner the belt cannot
+    The body is ``partner_id`` null, or one scene id. A partner the toolkit cannot
     compare is a 400. A scene with nothing unlocked does not start a job. No
     key still starts the job: the run keeps the catalog order, a plain progress
     note, and a lead built from the summary rows. A measurement that is already
@@ -685,6 +686,12 @@ def _start_analysis(body: bytes, manager: MeasurementJobManager) -> HttpResponse
     view = views.get(tool_id)
     if view is None:
         return _plain(400, "Unknown tool")
+    try:
+        overrides = parse_control_overrides(tool_id, payload.get("controls"))
+    except ControlError as exc:
+        return _json(400, {"error": str(exc)})
+    except KeyError:
+        return _plain(400, "Unknown tool")
     if view.locked:
         return _plain(400, view.reason)
     chosen = partner_id if isinstance(partner_id, str) else None
@@ -704,6 +711,7 @@ def _start_analysis(body: bytes, manager: MeasurementJobManager) -> HttpResponse
             folder,
             overview,
             len(step_sentences(tool_id)),
+            overrides,
         )
     except JobAlreadyRunningError:
         return _json(409, {"status": "running"})

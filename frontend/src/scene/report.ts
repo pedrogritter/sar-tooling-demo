@@ -63,7 +63,7 @@ export interface FigureView {
   imageUrl: string | null
   summary: { label: string; value: string }[]
   /**
-   * The reading when it has text. Otherwise the belt briefing. Locked and
+   * The reading when it has text. Otherwise the toolkit briefing. Locked and
    * failed cards are not figures, so they keep the briefing on their own.
    */
   prose: string
@@ -76,7 +76,7 @@ export interface HeldView {
   toolId: string
   label: string
   status: string
-  /** The belt's lock or failure text. The narrator note is not included. */
+  /** The toolkit's lock or failure text. The narrator note is not included. */
   text: string
 }
 
@@ -350,7 +350,7 @@ export function shouldLoadReport(status: JobSnapshot["status"]): boolean {
   return status === "running" || status === "done" || status === "failed"
 }
 
-/** The belt's label for a tool id, or the id itself when it is not on the belt. */
+/** The toolkit's label for a tool id, or the id itself when it is not on the toolkit. */
 export function toolLabel(toolId: string): string {
   return ANALYSIS_TOOLS.find((tool) => tool.id === toolId)?.label ?? toolId
 }
@@ -371,7 +371,7 @@ export function statusLabel(status: string): string {
 }
 
 /**
- * Read a stored briefing as headings, paragraphs, and bullet lists. The belt
+ * Read a stored briefing as headings, paragraphs, and bullet lists. The toolkit
  * writes only those three, so nothing else is interpreted and the text is
  * never inserted as HTML.
  */
@@ -534,7 +534,7 @@ function toolKey(toolId: string): string {
 
 /**
  * Visible prose for a done section. A reading with any non-whitespace text
- * is shown. A blank reading leaves the belt briefing in place.
+ * is shown. A blank reading leaves the toolkit briefing in place.
  */
 function sectionProse(section: ReportSection): string {
   if (section.reading_md.trim() !== "") {
@@ -563,7 +563,7 @@ function emptyReport(sceneId: string): Report {
     phase: "done",
     tool_order: [],
     synthesis_md: "",
-    synthesis_source: "belt",
+    synthesis_source: "toolkit",
     sections: [],
   }
 }
@@ -587,7 +587,7 @@ function normalizeSection(raw: Record<string, unknown>): ReportSection {
 }
 
 function textSource(value: unknown): ReportTextSource {
-  return value === "model" ? "model" : "belt"
+  return value === "model" ? "model" : "toolkit"
 }
 
 function isPhase(value: unknown): value is ReportPhase {

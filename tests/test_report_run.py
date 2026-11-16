@@ -11,13 +11,13 @@ from contextlib import contextmanager
 from pathlib import Path
 from unittest.mock import patch
 
-from scene.belt.catalog import analysis_dir, tool_spec
 from scene.jobs import JobAlreadyRunningError, MeasurementJobManager
 from scene.report.facts import ReportFacts
 from scene.report.run import FallbackModel, ReportModel, run_report
 from scene.report.select import STACK_SCOPE, IncludedTool, ToolSet
 from scene.report.store import Report, ReportSection, ReportStore
-from tests import test_belt
+from scene.toolkit.catalog import analysis_dir, tool_spec
+from tests import test_toolkit
 
 SCENE = "ICEYE_A_20260211T000000Z_1_X1_SM"
 PARTNER = "ICEYE_B_20260212T000000Z_1_X1_SM"
@@ -153,11 +153,11 @@ class RunnerBase(unittest.TestCase):
 
     @contextmanager
     def patched(self) -> Iterator[None]:
-        rooted = test_belt._rooted(self.root)
+        rooted = test_toolkit._rooted(self.root)
         with (
-            patch("scene.belt.catalog.scene_dir", rooted),
+            patch("scene.toolkit.catalog.scene_dir", rooted),
             patch("scene.report.store.scene_dir", rooted),
-            patch("scene.belt.run.run_tool", self.run_tool),
+            patch("scene.toolkit.run.run_tool", self.run_tool),
             patch("scene.report.run.report_facts", lambda scene_id: FACTS),
             patch("scene.report.run._glossary", lambda: "GLOSSARY TEXT"),
         ):
@@ -169,7 +169,7 @@ class RunnerBase(unittest.TestCase):
     def write_measurement(
         self, tool_id: str, partner_id: str | None = None, text: str = "ok"
     ) -> None:
-        """What the belt leaves behind for one finished tool."""
+        """What the toolkit leaves behind for one finished tool."""
 
         folder = analysis_dir(SCENE, tool_id, partner_id)
         folder.mkdir(parents=True, exist_ok=True)
@@ -181,7 +181,7 @@ class RunnerBase(unittest.TestCase):
             "limit": self.limits[tool_id],
         }
         (folder / "measurements.json").write_text(json.dumps(payload), "utf-8")
-        (folder / "briefing.md").write_text(f"# {tool_id}\n\nbelt text\n", "utf-8")
+        (folder / "briefing.md").write_text(f"# {tool_id}\n\ntoolkit text\n", "utf-8")
         (folder / "overview.png").write_bytes(b"png")
 
     def run_tool(
@@ -191,7 +191,7 @@ class RunnerBase(unittest.TestCase):
         on_step: Callable[[int, str], None],
         partner_id: str | None = None,
     ) -> None:
-        """The fake belt: records the call, reports a step, writes the files."""
+        """The fake toolkit: records the call, reports a step, writes the files."""
 
         self.ran.append((tool_id, partner_id))
         stored = ReportStore(scene_id).load()
@@ -201,7 +201,7 @@ class RunnerBase(unittest.TestCase):
         self.orders_seen.append([] if stored is None else list(stored.tool_order))
         if tool_id in self.failing:
             raise RuntimeError(f"{tool_id} could not run.")
-        on_step(1, f"belt step for {tool_id}")
+        on_step(1, f"toolkit step for {tool_id}")
         self.write_measurement(tool_id, partner_id)
 
     def stored(self) -> dict[str, ReportSection]:
@@ -292,6 +292,7 @@ class StoreTest(RunnerBase):
                 {
                     "scene_id": SCENE,
                     "question": "What is on the water?",
+                    "synthesis_source": "belt",
                     "sections": [
                         {
                             "tool_id": "amplitude-change",
@@ -315,7 +316,8 @@ class StoreTest(RunnerBase):
         self.assertEqual(loaded.phase, "done")
         self.assertEqual(loaded.tool_order, [])
         self.assertEqual(loaded.synthesis_md, "")
-        self.assertEqual(loaded.synthesis_source, "belt")
+        self.assertEqual(loaded.synthesis_source, "toolkit")
+        self.assertEqual(loaded.sections[0].briefing_source, "toolkit")
         self.assertEqual(loaded.sections[0].status, "waiting")
         self.assertEqual(loaded.sections[0].progress_note, "")
         self.assertEqual(loaded.sections[0].reading_md, "")
@@ -380,9 +382,9 @@ class RunReportTest(RunnerBase):
             self.sections_seen_by_run_tool[0], ["open-water"]
         )
         self.assertEqual(sections["open-water"].status, "done")
-        self.assertEqual(sections["open-water"].briefing_source, "belt")
+        self.assertEqual(sections["open-water"].briefing_source, "toolkit")
         self.assertEqual(
-            sections["open-water"].briefing_md, "# open-water\n\nbelt text\n"
+            sections["open-water"].briefing_md, "# open-water\n\ntoolkit text\n"
         )
         self.assertEqual(
             sections["open-water"].progress_note, "Working on the dark water."
@@ -421,18 +423,18 @@ class RunReportTest(RunnerBase):
             self.assertNotIn(banned, text.lower())
         self.assertEqual(self.ran, [("open-water", None)])
         self.assertIn((1, section.progress_note), self.steps)
-        belt_steps = [
-            sentence for _index, sentence in self.steps if "belt step" in sentence
+        toolkit_steps = [
+            sentence for _index, sentence in self.steps if "toolkit step" in sentence
         ]
-        self.assertEqual(belt_steps, [])
+        self.assertEqual(toolkit_steps, [])
 
-    def test_a_synthesis_failure_stores_the_belt_compilation(self) -> None:
+    def test_a_synthesis_failure_stores_the_toolkit_compilation(self) -> None:
         chains = FakeChains()
         chains.lead_error = RuntimeError("synthesis is down")
         with self.patched():
             self.start([_included("open-water")], chains)
             report = self.report()
-        self.assertEqual(report.synthesis_source, "belt")
+        self.assertEqual(report.synthesis_source, "toolkit")
         self.assertIn("open-water row", report.synthesis_md)
         self.assertIn("ok", report.synthesis_md)
         self.assertIn(WATER_LIMIT, report.synthesis_md)
@@ -484,7 +486,7 @@ class RunReportTest(RunnerBase):
                 with self.patched():
                     self.start([_included("open-water")], chains)
                     report = self.report()
-                self.assertEqual(report.synthesis_source, "belt")
+                self.assertEqual(report.synthesis_source, "toolkit")
                 self.assertIn("open-water row", report.synthesis_md)
                 lowered = report.synthesis_md.lower()
                 self.assertNotIn("two dates", lowered)
@@ -589,11 +591,11 @@ class RunReportTest(RunnerBase):
             notes.extend(item.progress_note for item in match)
             original(scene_id, tool_id, on_step, partner_id)
 
-        rooted = test_belt._rooted(self.root)
+        rooted = test_toolkit._rooted(self.root)
         with (
-            patch("scene.belt.catalog.scene_dir", rooted),
+            patch("scene.toolkit.catalog.scene_dir", rooted),
             patch("scene.report.store.scene_dir", rooted),
-            patch("scene.belt.run.run_tool", watching),
+            patch("scene.toolkit.run.run_tool", watching),
             patch("scene.report.run.report_facts", lambda scene_id: FACTS),
             patch("scene.report.run._glossary", lambda: "GLOSSARY TEXT"),
         ):
@@ -617,8 +619,8 @@ class RunReportTest(RunnerBase):
                             "tool_id": "open-water",
                             "status": "done",
                             "measurement": None,
-                            "briefing_md": "belt text",
-                            "briefing_source": "belt",
+                            "briefing_md": "toolkit text",
+                            "briefing_source": "toolkit",
                             "overview_url": None,
                             "partner_id": None,
                             "reading_md": 3,
@@ -631,7 +633,7 @@ class RunReportTest(RunnerBase):
         with self.patched(), self.assertRaises(ValueError):
             ReportStore(SCENE).load()
 
-    def test_a_kept_reading_is_stored_and_the_belt_briefing_stays(self) -> None:
+    def test_a_kept_reading_is_stored_and_the_toolkit_briefing_stays(self) -> None:
         chains = FakeChains()
         chains.reading = f"Dark water covers part of the frame. {WATER_LIMIT}"
         with self.patched():
@@ -644,11 +646,11 @@ class RunReportTest(RunnerBase):
         )
         self.assertEqual(saved_first.status, "done")
         self.assertEqual(saved_first.reading_md, "")
-        self.assertEqual(saved_first.briefing_md, "# open-water\n\nbelt text\n")
-        self.assertEqual(saved_first.briefing_source, "belt")
+        self.assertEqual(saved_first.briefing_md, "# open-water\n\ntoolkit text\n")
+        self.assertEqual(saved_first.briefing_source, "toolkit")
         self.assertEqual(section.reading_md, chains.reading)
-        self.assertEqual(section.briefing_md, "# open-water\n\nbelt text\n")
-        self.assertEqual(section.briefing_source, "belt")
+        self.assertEqual(section.briefing_md, "# open-water\n\ntoolkit text\n")
+        self.assertEqual(section.briefing_source, "toolkit")
         self.assertEqual(chains.reading_calls, ["open-water"])
 
     def test_a_rejected_reading_stores_an_empty_string(self) -> None:
@@ -669,8 +671,8 @@ class RunReportTest(RunnerBase):
                     self.start([_included("open-water")], chains)
                     section = self.stored()["open-water"]
                 self.assertEqual(section.reading_md, "")
-                self.assertEqual(section.briefing_md, "# open-water\n\nbelt text\n")
-                self.assertEqual(section.briefing_source, "belt")
+                self.assertEqual(section.briefing_md, "# open-water\n\ntoolkit text\n")
+                self.assertEqual(section.briefing_source, "toolkit")
                 self.assertEqual(chains.reading_calls, ["open-water"])
 
     def test_a_raised_reading_call_stores_an_empty_string(self) -> None:
@@ -681,7 +683,7 @@ class RunReportTest(RunnerBase):
             self.start([_included("open-water")], chains)
             section = self.stored()["open-water"]
         self.assertEqual(section.reading_md, "")
-        self.assertEqual(section.briefing_md, "# open-water\n\nbelt text\n")
+        self.assertEqual(section.briefing_md, "# open-water\n\ntoolkit text\n")
         self.assertEqual(chains.reading_calls, ["open-water"])
 
     def test_a_locked_section_is_not_sent_for_a_reading(self) -> None:
@@ -731,8 +733,8 @@ class RunReportTest(RunnerBase):
             section = self.stored()["open-water"]
         self.assertEqual(chains.reads, 0)
         self.assertEqual(section.reading_md, "")
-        self.assertEqual(section.briefing_source, "belt")
-        self.assertEqual(section.briefing_md, "# open-water\n\nbelt text\n")
+        self.assertEqual(section.briefing_source, "toolkit")
+        self.assertEqual(section.briefing_md, "# open-water\n\ntoolkit text\n")
 
 
 class StartReportTest(unittest.TestCase):
@@ -760,7 +762,7 @@ class StartReportTest(unittest.TestCase):
             self.assertEqual(manager.current().status, "done")
 
     def test_a_finished_report_job_has_no_result_and_keeps_its_sentence(self) -> None:
-        """Belt panes treat any done result as tool output, so a report has none."""
+        """Toolkit panes treat any done result as tool output, so a report has none."""
 
         def runner(on_step: Callable[[int, str], None]) -> None:
             on_step(2, "Writing the report.")

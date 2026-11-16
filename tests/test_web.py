@@ -18,7 +18,7 @@ from PIL import Image
 
 from scene.jobs import MeasurementJobManager
 from scene.web import AppState, HttpResponse, build_state, dispatch, make_handler
-from tests.test_belt import OpenWaterPictureTest, _rooted
+from tests.test_toolkit import OpenWaterPictureTest, _rooted
 
 SCENE_ID = "ICEYE_EYCKP5_20251024T135309Z_6724574_X52_SLF"
 
@@ -122,7 +122,7 @@ class AnalysisRouteTest(unittest.TestCase):
             rooted = _rooted(root)
             with (
                 patch("scene.web.scene_dir", rooted),
-                patch("scene.belt.catalog.scene_dir", rooted),
+                patch("scene.toolkit.catalog.scene_dir", rooted),
             ):
                 unknown = self._post(first, "not-a-tool")
                 self.assertEqual(unknown.status, 400)
@@ -139,6 +139,48 @@ class AnalysisRouteTest(unittest.TestCase):
                 stranger = self._post(first, "amplitude-change", partner_id=scan)
                 self.assertEqual(stranger.status, 400)
                 self.assertIn(b"Choose a second scene", stranger.body)
+
+                wide = dispatch(
+                    "POST",
+                    "/api/jobs/run",
+                    json.dumps(
+                        {
+                            "scene_id": first,
+                            "tool_id": "open-water",
+                            "controls": {"water_gate_db": 9},
+                        }
+                    ).encode("utf-8"),
+                    build_state(),
+                )
+                self.assertEqual(wide.status, 400)
+                self.assertIn("water_gate_db", json.loads(wide.body)["error"])
+                unknown_control = dispatch(
+                    "POST",
+                    "/api/jobs/run",
+                    json.dumps(
+                        {
+                            "scene_id": first,
+                            "tool_id": "open-water",
+                            "controls": {"beaufort": 3},
+                        }
+                    ).encode("utf-8"),
+                    build_state(),
+                )
+                self.assertEqual(unknown_control.status, 400)
+                self.assertIn(
+                    "Unknown control", json.loads(unknown_control.body)["error"]
+                )
+                tools = dispatch(
+                    "GET", f"/api/scenes/{first}/tools", b"", build_state()
+                )
+                listed = {
+                    item["id"]: item for item in json.loads(tools.body)["tools"]
+                }
+                self.assertEqual(listed["stack-mean"]["controls"], [])
+                self.assertEqual(
+                    [item["id"] for item in listed["open-water"]["controls"]],
+                    ["water_gate_db", "texture_window_px", "max_hole_px"],
+                )
 
     def test_second_analysis_is_refused_while_one_is_running(self) -> None:
         with tempfile.TemporaryDirectory() as raw:
@@ -157,8 +199,8 @@ class AnalysisRouteTest(unittest.TestCase):
             try:
                 with (
                     patch("scene.web.scene_dir", rooted),
-                    patch("scene.belt.catalog.scene_dir", rooted),
-                    patch("scene.belt.run.run_tool", block),
+                    patch("scene.toolkit.catalog.scene_dir", rooted),
+                    patch("scene.toolkit.run.run_tool", block),
                 ):
                     first = self._post(scene_id, "open-water", manager)
                     self.assertEqual(first.status, 202)
@@ -186,7 +228,7 @@ class AnalysisRouteTest(unittest.TestCase):
             url = f"/api/scenes/{scene_id}/analysis/open-water/overview.png"
             with (
                 patch("scene.web.scene_dir", rooted),
-                patch("scene.belt.catalog.scene_dir", rooted),
+                patch("scene.toolkit.catalog.scene_dir", rooted),
             ):
                 served = dispatch("GET", url, b"", build_state())
                 self.assertEqual(served.status, 200)

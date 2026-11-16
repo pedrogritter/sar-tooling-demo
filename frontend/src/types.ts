@@ -137,6 +137,7 @@ export interface CatalogSearchResponse {
 
 export interface LibraryScene {
   scene_id: string
+  place: string
   collected_at: string
   platform: string
   mode: string
@@ -173,6 +174,17 @@ export interface DownloadAccepted {
   status: "running"
 }
 
+/** One number the analysis sidebar posts with Run. `value` is the suggestion. */
+export interface ToolControl {
+  id: string
+  label: string
+  unit: string
+  min: number
+  max: number
+  step: number
+  value: number
+}
+
 export interface AnalysisTool {
   id: string
   label: string
@@ -185,6 +197,7 @@ export interface AnalysisTool {
   overview_url: string | null
   measurement: Measurement | null
   briefing_html: string | null
+  controls: ToolControl[]
 }
 
 export interface AnalysisToolsResponse {
@@ -196,7 +209,7 @@ export type ReportSectionStatus =
 
 export type ReportPhase = "planning" | "running" | "writing" | "done"
 
-export type ReportTextSource = "model" | "belt"
+export type ReportTextSource = "model" | "toolkit"
 
 /** One section of GET /api/scenes/<id>/report. Partial while a job runs. */
 export interface ReportSection {

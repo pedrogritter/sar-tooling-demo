@@ -57,7 +57,7 @@ describe("usage guide document", () => {
     expect(GUIDE_CONTENTS_LABEL).toBe("In this guide")
   })
 
-  it("does not copy a belt limit into the guide modules", () => {
+  it("does not copy a toolkit limit into the guide modules", () => {
     const guide = readFileSync("src/guide/guide.ts", "utf8")
     const view = readFileSync("src/guide/DocumentationView.tsx", "utf8")
 

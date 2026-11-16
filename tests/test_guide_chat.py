@@ -8,10 +8,10 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from scene.belt.run import LIMITS
 from scene.guide_chat import GuideChatError, answer_guide_chat, model_or_none
 from scene.jobs import MeasurementJobManager
 from scene.paths import project_root
+from scene.toolkit.run import LIMITS
 from scene.web import dispatch
 
 OFF_TOPIC = "Who won the world cup in 1998?"

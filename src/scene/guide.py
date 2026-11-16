@@ -1,6 +1,6 @@
 """Usage guide text for the Documentation section.
 
-Paragraphs quote the belt limits, the glossary, and the scene note.
+Paragraphs quote the toolkit limits, the glossary, and the scene note.
 This module does not call a model and does not read a raster.
 """
 
@@ -8,8 +8,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from scene.belt.catalog import TOOLS
-from scene.belt.run import LIMITS
+from scene.toolkit.catalog import TOOLS
+from scene.toolkit.run import LIMITS
 
 READ_GRD = (
     "It reads grd-cog.tif. The calibration factor and the ground size of "
@@ -189,7 +189,7 @@ def _intro() -> tuple[GuideSection, ...]:
                 "look.",
                 "Running a tool draws a picture with a legend, then writes "
                 "a measurement and a briefing. The briefing carries that "
-                "tool's limit sentence. The belt does not call a model.",
+                "tool's limit sentence. The toolkit does not call a model.",
                 "Single-scene tools run on spotlight and stripmap. Scan and "
                 "Scan Wide stay locked because those GRDs are not treated "
                 "as radiometrically calibrated. Change and stack tools need "

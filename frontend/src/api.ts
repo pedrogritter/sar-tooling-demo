@@ -109,17 +109,29 @@ export async function fetchAnalysisTools(
 export async function startAnalysisJob(
   sceneId: string,
   toolId: string,
-  partnerId: string | null
+  partnerId: string | null,
+  controls?: Record<string, number>
 ): Promise<MeasureJobAccepted> {
+  const body: {
+    scene_id: string
+    tool_id: string
+    partner_id: string | null
+    controls?: Record<string, number>
+  } = {
+    scene_id: sceneId,
+    tool_id: toolId,
+    partner_id: partnerId,
+  }
+
+  if (controls !== undefined) {
+    body.controls = controls
+  }
+
   try {
     return await requestJson<MeasureJobAccepted>("/api/jobs/run", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        scene_id: sceneId,
-        tool_id: toolId,
-        partner_id: partnerId,
-      }),
+      body: JSON.stringify(body),
     })
   } catch (error) {
     if (error instanceof ApiError && error.status === 409) {

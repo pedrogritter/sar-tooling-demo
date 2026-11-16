@@ -19,8 +19,6 @@ from langchain_core.outputs import ChatGeneration, ChatResult
 from langchain_core.runnables import Runnable, RunnableLambda
 from pydantic import Field
 
-from scene.belt.catalog import ToolView, tool_spec
-from scene.belt.run import LIMITS
 from scene.catalog import CatalogRecord
 from scene.paths import LISBON_SCENE_ID, project_root
 from scene.report.chains import (
@@ -35,7 +33,9 @@ from scene.report.chains import (
 from scene.report.facts import ReportFacts, report_facts
 from scene.report.select import STACK_SCOPE, IneligiblePartner, choose_tools
 from scene.report.store import ReportSection
-from tests import test_belt
+from scene.toolkit.catalog import ToolView, tool_spec
+from scene.toolkit.run import LIMITS
+from tests import test_toolkit
 
 OPEN_ID = "ICEYE_A_20260211T000000Z_1_X1_SM"
 NEIGHBOUR_ID = "ICEYE_B_20260212T000000Z_1_X1_SM"
@@ -70,16 +70,16 @@ def _record(scene_id: str, **changes: object) -> CatalogRecord:
 
 
 def _write_scene(root: Path, scene_id: str) -> None:
-    test_belt.OpenWaterPictureTest()._write_scene(root, scene_id, dark=True)
+    test_toolkit.OpenWaterPictureTest()._write_scene(root, scene_id, dark=True)
 
 
 @contextmanager
 def _patched(root: Path) -> Iterator[None]:
     """Point every scene folder lookup at ``root``, as tests/test_web.py does."""
 
-    rooted = test_belt._rooted(root)
+    rooted = test_toolkit._rooted(root)
     with (
-        patch("scene.belt.catalog.scene_dir", rooted),
+        patch("scene.toolkit.catalog.scene_dir", rooted),
         patch("scene.report.facts.scene_dir", rooted),
     ):
         yield
@@ -272,7 +272,7 @@ def _view(
     reason: str = "",
     partners: tuple[str, ...] = (),
 ) -> ToolView:
-    """A belt view with the real kind, label, and description for ``tool_id``."""
+    """A toolkit view with the real kind, label, and description for ``tool_id``."""
 
     spec = tool_spec(tool_id)
     return ToolView(
@@ -409,7 +409,7 @@ class ChooseToolsTests(unittest.TestCase):
 
 
 class GlossaryTests(unittest.TestCase):
-    def test_glossary_repeats_the_belt_limits_and_the_named_terms(self) -> None:
+    def test_glossary_repeats_the_toolkit_limits_and_the_named_terms(self) -> None:
         text = (project_root() / "content" / "sar_glossary.md").read_text(
             encoding="utf-8"
         )
@@ -677,8 +677,8 @@ class ReportChainsTests(unittest.TestCase):
                 "limit": "Dark pixels are not proof of water.",
                 "overview_path": "/data/overview-path-leak.png",
             },
-            briefing_md="belt briefing",
-            briefing_source="belt",
+            briefing_md="toolkit briefing",
+            briefing_source="toolkit",
             overview_url="/api/overview-url-leak.png",
             partner_id=None,
             progress_note="A joke about a ship that must stay off the page.",
@@ -688,7 +688,7 @@ class ReportChainsTests(unittest.TestCase):
             status="locked",
             measurement=None,
             briefing_md=LOCK_REASON,
-            briefing_source="belt",
+            briefing_source="toolkit",
             overview_url=None,
             partner_id=None,
         )
@@ -697,7 +697,7 @@ class ReportChainsTests(unittest.TestCase):
             status="failed",
             measurement=None,
             briefing_md="sea-roughness could not run.",
-            briefing_source="belt",
+            briefing_source="toolkit",
             overview_url=None,
             partner_id=None,
         )
@@ -782,7 +782,7 @@ class ReportChainsTests(unittest.TestCase):
                 "overview_path": "/data/overview-path-leak.png",
             },
             briefing_md="glossary-leak Sigma-nought is radar brightness.",
-            briefing_source="belt",
+            briefing_source="toolkit",
             overview_url="/api/overview-url-leak.png",
             partner_id=None,
             progress_note="A joke about a ship that must stay off the page.",

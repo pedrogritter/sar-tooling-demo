@@ -23,7 +23,7 @@ describe("selected tool", () => {
     expect(toolById("preview").label).toBe("Preview")
   })
 
-  it("treats the analysis belt as analysis tools", () => {
+  it("treats the analysis toolkit as analysis tools", () => {
     expect(isAnalysisTool("open-water")).toBe(true)
     expect(isAnalysisTool("dark-sea-anomaly")).toBe(true)
     expect(isAnalysisTool("catalog")).toBe(false)

@@ -94,15 +94,16 @@ class MeasurementJobManager:
         output_dir: Path,
         overview_url: str,
         step_count: int,
+        controls: dict[str, float] | None = None,
     ) -> str:
-        """Run one belt tool. The Lisbon measurement keeps ``start``."""
+        """Run one toolkit tool. The Lisbon measurement keeps ``start``."""
 
         def runner(on_step: OnStep) -> None:
-            module = importlib.import_module("scene.belt.run")
+            module = importlib.import_module("scene.toolkit.run")
             run_tool = getattr(module, "run_tool")
             if not callable(run_tool):
-                raise RuntimeError("scene.belt.run.run_tool is not callable")
-            run_tool(scene_id, tool_id, on_step, partner_id)
+                raise RuntimeError("scene.toolkit.run.run_tool is not callable")
+            run_tool(scene_id, tool_id, on_step, partner_id, controls)
 
         return self._begin(runner, output_dir, overview_url, step_count)
 
@@ -114,7 +115,7 @@ class MeasurementJobManager:
         The runner reports its own steps and saves ``report.json`` itself. The
         job reads no measurement of its own, so a finished report job has no
         result at all (``None``). An empty result would look like tool output
-        to a belt pane, which treats any done result that way.
+        to a toolkit pane, which treats any done result that way.
         """
 
         return self._begin(runner, None, "", step_count)

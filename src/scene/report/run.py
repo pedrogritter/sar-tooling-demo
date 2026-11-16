@@ -1,8 +1,8 @@
 """Build the report: order the tools, run each one, then write one lead.
 
-The belt measures. After a done section is saved, one model call may add a
+The toolkit measures. After a done section is saved, one model call may add a
 reading. A model call that fails does not stop the run: the tool order falls
-back to the belt catalog, a missing key or a failed narrator stores a plain
+back to the toolkit catalog, a missing key or a failed narrator stores a plain
 progress sentence, a rejected reading stays empty, and a synthesis failure
 becomes a lead built from the summary rows. A single-scene lead that invents
 a second date or a stack is discarded too.
@@ -17,8 +17,6 @@ from dataclasses import replace
 from pathlib import Path
 from typing import Literal, Protocol
 
-from scene.belt import run as belt_run
-from scene.belt.catalog import analysis_dir
 from scene.paths import project_root
 from scene.report.facts import ReportFacts, report_facts
 from scene.report.select import (
@@ -28,10 +26,12 @@ from scene.report.select import (
     ToolSet,
 )
 from scene.report.store import BriefingSource, Report, ReportSection, ReportStore
+from scene.toolkit import run as toolkit_run
+from scene.toolkit.catalog import analysis_dir
 
 OnStep = Callable[[int, str], None]
 
-LOCKED_FALLBACK = "The belt keeps this tool locked for this scene."
+LOCKED_FALLBACK = "The toolkit keeps this tool locked for this scene."
 
 # Phrases a section reading must not contain. The match is case-insensitive.
 _BANNED_READING = ("ship", "spill", "tide height", "building height")
@@ -61,7 +61,7 @@ class ReportModel(Protocol):
 
 
 class FallbackModel:
-    """Every call fails. The run keeps the catalog, a plain note, and the belt lead."""
+    """Every call fails. The catalog, a plain note, and the toolkit lead stay."""
 
     def order(
         self, facts: ReportFacts, tools: Sequence[Mapping[str, str]]
@@ -110,7 +110,7 @@ def run_report(
         phase="planning",
         tool_order=[],
         synthesis_md="",
-        synthesis_source="belt",
+        synthesis_source="toolkit",
         sections=[],
     )
     store.save(report)
@@ -141,7 +141,7 @@ def run_report(
     )
 
 
-def belt_lead(
+def toolkit_lead(
     facts: ReportFacts, chosen: ToolSet, sections: Sequence[ReportSection]
 ) -> str:
     """A lead made only from the rows, the limits, the failures, and the locks.
@@ -185,7 +185,7 @@ def belt_lead(
 
 
 def _ordered(chains: ReportModel, facts: ReportFacts, chosen: ToolSet) -> list[str]:
-    """The model's permutation, or the belt catalog order when the reply is unusable."""
+    """The model's permutation, or toolkit order when the reply is unusable."""
 
     runnable = [tool for tool in chosen.tools if not tool.locked]
     expected = [tool.id for tool in runnable]
@@ -223,15 +223,15 @@ def _build_section(
     partner = partner_id if tool.id == AMPLITUDE_TOOL else None
     note = _narrate(chains, facts, tool)
     report = _save(store, report, _unfinished(tool.id, "running", partner, note))
-    # The poll reads this sentence while the raster runs. Belt steps do not replace it.
+    # The poll reads this sentence while the raster runs. Tool steps do not replace it.
     on_step(1, note)
 
     folder = analysis_dir(scene_id, tool.id, partner)
     try:
         if not (folder / "measurements.json").is_file():
-            belt_run.run_tool(scene_id, tool.id, _hold(note, on_step), partner)
+            toolkit_run.run_tool(scene_id, tool.id, _hold(note, on_step), partner)
         measurement = _read_measurement(folder)
-        belt_text = (folder / "briefing.md").read_text(encoding="utf-8")
+        toolkit_text = (folder / "briefing.md").read_text(encoding="utf-8")
     except Exception as exc:  # noqa: BLE001 - a tool failure becomes its section.
         failed = _unfinished(tool.id, "failed", partner, note, _reason(exc))
         return _save(store, report, failed)
@@ -239,8 +239,8 @@ def _build_section(
         tool_id=tool.id,
         status="done",
         measurement=measurement,
-        briefing_md=belt_text,
-        briefing_source="belt",
+        briefing_md=toolkit_text,
+        briefing_source="toolkit",
         overview_url=_overview_url(scene_id, tool.id, partner, folder),
         partner_id=partner,
         progress_note=note,
@@ -256,7 +256,7 @@ def _with_reading(
     store: ReportStore,
     report: Report,
 ) -> Report:
-    """Ask for a reading only after the belt section is already saved.
+    """Ask for a reading only after the toolkit section is already saved.
 
     No key skips the call. ``FallbackModel`` is that missing key. An exception,
     a blank reply, or a rejected reply leaves ``reading_md`` empty and does
@@ -267,7 +267,7 @@ def _with_reading(
         return report
     try:
         reply = chains.read_section(facts, section)
-    except Exception:  # noqa: BLE001 - a failed reading keeps the belt briefing.
+    except Exception:  # noqa: BLE001 - a failed reading keeps the toolkit briefing.
         return report
     kept = _accepted_reading(reply, section.measurement)
     if not kept:
@@ -303,7 +303,7 @@ def _names_a_target(text: str) -> bool:
 
 
 def _limit_sentence(measurement: dict[str, object] | None) -> str:
-    """The belt's limit sentence, or empty when this section has none."""
+    """The toolkit's limit sentence, or empty when this section has none."""
 
     if measurement is None:
         return ""
@@ -353,9 +353,9 @@ def _synthesize(
     sections: Sequence[ReportSection],
     glossary: str,
 ) -> tuple[str, BriefingSource]:
-    """The model's lead, or the belt compilation when that reply cannot be kept.
+    """The model's lead, or the toolkit compilation when that reply cannot be kept.
 
-    A blank or failed call uses the belt compilation. So does a single-scene
+    A blank or failed call uses the toolkit compilation. So does a single-scene
     reply that mentions a second date or a stack. A stack run keeps the scope
     sentence even when the model omits it.
     """
@@ -370,11 +370,11 @@ def _synthesize(
             stack_scope=scope,
             matched_dates=chosen.matched_dates,
         )
-    except Exception:  # noqa: BLE001 - a failed lead keeps the belt compilation.
-        return belt_lead(facts, chosen, sections), "belt"
+    except Exception:  # noqa: BLE001 - a failed lead keeps the toolkit compilation.
+        return toolkit_lead(facts, chosen, sections), "toolkit"
     cleaned = text.strip()
     if not cleaned or _ungrounded_lead(cleaned, chosen):
-        return belt_lead(facts, chosen, sections), "belt"
+        return toolkit_lead(facts, chosen, sections), "toolkit"
     return _with_stack_scope(cleaned, chosen), "model"
 
 
@@ -403,7 +403,7 @@ def _with_stack_scope(text: str, chosen: ToolSet) -> str:
 
 
 def _locked_sections(chosen: ToolSet) -> list[ReportSection]:
-    """Locked tools in this set, with the belt's sentence. They are not run."""
+    """Locked tools in this set, with the toolkit's sentence. They are not run."""
 
     return [
         ReportSection(
@@ -411,7 +411,7 @@ def _locked_sections(chosen: ToolSet) -> list[ReportSection]:
             status="locked",
             measurement=None,
             briefing_md=tool.reason or LOCKED_FALLBACK,
-            briefing_source="belt",
+            briefing_source="toolkit",
             overview_url=None,
             partner_id=None,
             progress_note="",
@@ -444,7 +444,7 @@ def _unfinished(
         status=status,
         measurement=None,
         briefing_md=briefing_md,
-        briefing_source="belt",
+        briefing_source="toolkit",
         overview_url=None,
         partner_id=partner_id,
         progress_note=progress_note,
@@ -460,7 +460,7 @@ def _save(store: ReportStore, report: Report, section: ReportSection) -> Report:
 
 
 def _read_measurement(folder: Path) -> dict[str, object]:
-    """The belt's measurements.json. Anything but an object is an error."""
+    """The toolkit's measurements.json. Anything but an object is an error."""
 
     payload = json.loads((folder / "measurements.json").read_text(encoding="utf-8"))
     if not isinstance(payload, dict):
@@ -471,7 +471,7 @@ def _read_measurement(folder: Path) -> dict[str, object]:
 def _overview_url(
     scene_id: str, tool_id: str, partner_id: str | None, folder: Path
 ) -> str | None:
-    """The belt's picture URL, or None when the tool drew none."""
+    """The toolkit's picture URL, or None when the tool drew none."""
 
     if not (folder / "overview.png").is_file():
         return None

@@ -1,7 +1,7 @@
 /**
  * Decide whether a catalog row can pair with the scene on stage.
  *
- * The rule matches the belt: same orbit string, same look string,
+ * The rule matches the toolkit: same orbit string, same look string,
  * incidence within 1 degree, and an intersection of at least 30 percent
  * of the smaller footprint. A row that is still missing one of those
  * fields is unknown, so the download stays available.

@@ -13,14 +13,14 @@ from contextlib import contextmanager
 from pathlib import Path
 from unittest.mock import patch
 
-from scene.belt.catalog import ToolView, analysis_dir, tool_spec
 from scene.jobs import MeasurementJobManager
 from scene.report.facts import ReportFacts
 from scene.report.pdf import render_html
 from scene.report.select import STACK_SCOPE
 from scene.report.store import Report, ReportSection, ReportStore
+from scene.toolkit.catalog import ToolView, analysis_dir, tool_spec
 from scene.web import AppState, HttpResponse, dispatch
-from tests import test_belt
+from tests import test_toolkit
 
 SCENE = "ICEYE_A_20260211T000000Z_1_X1_SM"
 PARTNER = "ICEYE_B_20260212T000000Z_1_X1_SM"
@@ -135,7 +135,7 @@ class WebBase(unittest.TestCase):
 
     @contextmanager
     def patched(self, chains: object | None = None) -> Iterator[None]:
-        rooted = test_belt._rooted(self.root)
+        rooted = test_toolkit._rooted(self.root)
 
         def run_tool(
             scene_id: str,
@@ -152,7 +152,7 @@ class WebBase(unittest.TestCase):
                 "limit": WATER_LIMIT,
             }
             (folder / "measurements.json").write_text(json.dumps(payload), "utf-8")
-            (folder / "briefing.md").write_text("# Belt\n\nbelt text\n", "utf-8")
+            (folder / "briefing.md").write_text("# Toolkit\n\ntoolkit text\n", "utf-8")
 
         env = {
             key: value for key, value in os.environ.items() if key != "OPENAI_API_KEY"
@@ -161,10 +161,10 @@ class WebBase(unittest.TestCase):
             patch.dict(os.environ, env, clear=True),
             patch("scene.web.scene_dir", rooted),
             patch("scene.report.store.scene_dir", rooted),
-            patch("scene.belt.catalog.scene_dir", rooted),
+            patch("scene.toolkit.catalog.scene_dir", rooted),
             patch("scene.report.run.report_facts", lambda scene_id: _facts()),
             patch("scene.report.select.tools_for_scene", lambda scene_id: self.views),
-            patch("scene.belt.run.run_tool", run_tool),
+            patch("scene.toolkit.run.run_tool", run_tool),
             patch("scene.report.run._glossary", lambda: "GLOSSARY TEXT"),
             patch("scene.report.chains.load_local_env", lambda: None),
             patch("scene.report.chains.chains_or_none", lambda: chains),
@@ -201,7 +201,7 @@ class RunRouteTest(WebBase):
             self.wait()
             document = json.loads(self.get(f"/api/scenes/{SCENE}/report").body)
         self.assertEqual(self.manager.current().status, "done")
-        self.assertEqual(document["synthesis_source"], "belt")
+        self.assertEqual(document["synthesis_source"], "toolkit")
         notes = [item["progress_note"] for item in document["sections"]]
         self.assertIn("Measuring Open water on this stripmap scene.", notes)
         saved = " ".join(notes).lower()
@@ -335,7 +335,7 @@ class GetReportTest(WebBase):
         self.assertEqual(document["phase"], "done")
         self.assertEqual(document["tool_order"], [])
         self.assertEqual(document["synthesis_md"], "")
-        self.assertEqual(document["synthesis_source"], "belt")
+        self.assertEqual(document["synthesis_source"], "toolkit")
 
     def test_an_older_file_is_returned_with_defaults(self) -> None:
         with self.patched():
@@ -352,7 +352,7 @@ class GetReportTest(WebBase):
                                 "status": "waiting",
                                 "measurement": None,
                                 "briefing_md": "The comparison has not been made.",
-                                "briefing_source": "belt",
+                                "briefing_source": "toolkit",
                                 "overview_url": None,
                                 "partner_id": None,
                             }
@@ -423,7 +423,7 @@ def _section(
         status=status,  # type: ignore[arg-type]
         measurement=measurement,
         briefing_md=briefing,
-        briefing_source="belt",
+        briefing_source="toolkit",
         overview_url=None,
         partner_id=partner_id,
         progress_note=progress_note,
@@ -455,7 +455,7 @@ class PdfTest(WebBase):
                     _section(
                         "open-water",
                         "done",
-                        "belt text that is not the joke",
+                        "toolkit text that is not the joke",
                         {
                             "summary": [{"label": "Water area", "value": "1.20 km²"}],
                             "limit": WATER_LIMIT,
@@ -495,9 +495,9 @@ class PdfTest(WebBase):
         self.assertIn("counter(page)", document)
         self.assertIn("break-before: page", document)
 
-    def test_a_done_section_prints_the_reading_or_the_belt_briefing(self) -> None:
+    def test_a_done_section_prints_the_reading_or_the_toolkit_briefing(self) -> None:
         reading = "Dark water covers part of the frame."
-        belt = "belt briefing that the reading replaces"
+        toolkit = "toolkit briefing that the reading replaces"
         document = render_html(
             Report(
                 scene_id=SCENE,
@@ -506,7 +506,7 @@ class PdfTest(WebBase):
                     _section(
                         "open-water",
                         "done",
-                        belt,
+                        toolkit,
                         {
                             "summary": [
                                 {"label": "Water area", "value": "1.20 km²"}
@@ -518,7 +518,7 @@ class PdfTest(WebBase):
                     _section(
                         "sea-roughness",
                         "done",
-                        "roughness belt briefing",
+                        "roughness toolkit briefing",
                         {
                             "summary": [{"label": "Rough share", "value": "4 %"}],
                             "limit": "This split is roughness, not a wave height.",
@@ -542,10 +542,10 @@ class PdfTest(WebBase):
         )
         self.assertLess(document.index("1.20 km²"), document.index(WATER_LIMIT))
         self.assertLess(document.index(WATER_LIMIT), document.index(reading))
-        self.assertNotIn(belt, document)
-        self.assertIn("roughness belt briefing", document)
+        self.assertNotIn(toolkit, document)
+        self.assertIn("roughness toolkit briefing", document)
         self.assertLess(
-            document.index("4 %"), document.index("roughness belt briefing")
+            document.index("4 %"), document.index("roughness toolkit briefing")
         )
         self.assertIn(LOCK_REASON, document)
         self.assertNotIn("locked reading", document)

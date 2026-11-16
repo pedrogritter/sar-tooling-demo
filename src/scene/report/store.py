@@ -11,7 +11,7 @@ from typing import Literal, cast
 from scene.paths import scene_dir
 
 SectionStatus = Literal["done", "waiting", "locked", "running", "failed"]
-BriefingSource = Literal["model", "belt"]
+BriefingSource = Literal["model", "toolkit"]
 Phase = Literal["planning", "running", "writing", "done"]
 
 
@@ -21,10 +21,10 @@ class ReportSection:
 
     tool_id: str
     status: SectionStatus
-    # The belt's measurements.json (``summary`` and ``limit``). None until it ran.
+    # The toolkit's measurements.json (``summary`` and ``limit``). None until it ran.
     measurement: dict[str, object] | None
     briefing_md: str
-    # ``belt`` for a lock, a failure, or the tool's own briefing.md.
+    # ``toolkit`` for a lock, a failure, or the tool's own briefing.md.
     briefing_source: BriefingSource
     overview_url: str | None
     # The second scene of an amplitude change. None for every other tool.
@@ -75,7 +75,7 @@ class Report:
     phase: Phase = "done"
     tool_order: list[str] = field(default_factory=list)
     synthesis_md: str = ""
-    synthesis_source: BriefingSource = "belt"
+    synthesis_source: BriefingSource = "toolkit"
     sections: list[ReportSection] = field(default_factory=list)
 
     def with_section(self, section: ReportSection) -> Report:
@@ -138,7 +138,7 @@ class ReportStore:
             synthesis_source=(
                 _source(raw["synthesis_source"])
                 if "synthesis_source" in raw
-                else "belt"
+                else "toolkit"
             ),
             sections=[ReportSection.from_dict(_object(item)) for item in sections],
         )
@@ -236,6 +236,7 @@ def _phase(value: object) -> Phase:
 def _source(value: object) -> BriefingSource:
     if value == "model":
         return "model"
-    if value == "belt":
-        return "belt"
+    # Older reports stored the toolkit text as "belt". A new run writes "toolkit".
+    if value in {"toolkit", "belt"}:
+        return "toolkit"
     raise ValueError(f"Unknown briefing source: {value!r}")

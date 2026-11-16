@@ -8,6 +8,7 @@ long bright component on the waterline is a structure, not a named bridge.
 from __future__ import annotations
 
 import math
+from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import cast
 
@@ -27,6 +28,273 @@ WATER_GATE_DB = 1.5
 TEXTURE_WINDOW = 31
 # Speckle gaps inside the water. An island or a city block is larger.
 MAX_WATER_HOLE = 64
+# 0.0005 of a frame of 1 m pixels. Dividing by the overview pixel area
+# keeps that ground area when the loaded overview is coarser than 1 m.
+BUILT_UP_AREA_FRACTION = 0.0005
+# The 1.5 dB gate stays inside this incidence band. Outside it, sea
+# brightness has already moved by about 1 dB per degree, so the gate
+# widens by half a decibel per degree and then stops at the control max.
+_INCIDENCE_LOW = 26.0
+_INCIDENCE_HIGH = 34.0
+_INCIDENCE_DB_PER_DEGREE = 0.5
+
+
+@dataclass(frozen=True)
+class Control:
+    """One number the sidebar can move. ``suggest`` is how the scene fills it.
+
+    ``incidence`` applies only when ``default`` is 1.5 dB. ``pixel`` keeps a
+    window near ``default`` metres on the ground. ``none`` keeps ``default``.
+    """
+
+    id: str
+    label: str
+    unit: str
+    minimum: float
+    maximum: float
+    step: float
+    default: float
+    suggest: str
+
+
+class ControlError(ValueError):
+    """The job body named an unknown control or a number outside its range."""
+
+
+def _control(
+    control_id: str,
+    label: str,
+    unit: str,
+    minimum: float,
+    maximum: float,
+    step: float,
+    default: float,
+    suggest: str = "none",
+) -> Control:
+    return Control(
+        control_id, label, unit, minimum, maximum, step, default, suggest
+    )
+
+
+# Shared objects so two tools cannot drift apart on a gate they both state.
+_WATER_GATE = _control(
+    "water_gate_db", "Water gate", "dB", 0.5, 4, 0.1, WATER_GATE_DB, "incidence"
+)
+_TEXTURE_WINDOW = _control(
+    "texture_window_px",
+    "Texture window",
+    "px",
+    5,
+    61,
+    1,
+    TEXTURE_WINDOW,
+    "pixel",
+)
+_MAX_HOLE = _control(
+    "max_hole_px", "Largest hole filled", "px", 8, 256, 1, MAX_WATER_HOLE, "pixel"
+)
+_SPLIT = _control(
+    "split_db", "Roughness split", "dB", 0.5, 4, 0.1, 1.5, "incidence"
+)
+_BRIGHT_8 = _control("bright_offset_db", "Bright offset", "dB", 4, 16, 0.1, 8)
+_BRIGHT_6 = _control("bright_offset_db", "Bright offset", "dB", 3, 12, 0.1, 6)
+_MIN_AREA = _control("min_area_m2", "Minimum area", "m²", 4, 200, 1, 20)
+_BAND = _control("band_m", "Shore band", "m", 50, 400, 1, 150)
+_MIN_LENGTH = _control("min_length_m", "Minimum length", "m", 50, 1000, 1, 200)
+_SEARCH = _control(
+    "search_radius_px", "Search radius", "px", 2, 20, 1, 6, "pixel"
+)
+_MOVE = _control("move_gate_m", "Move gate", "m", 5, 100, 1, 20)
+_CHANGE = _control("change_db", "Change gate", "dB", 1, 8, 0.1, CHANGE_DB)
+_CHANGE_SUPPORT = _control(
+    "support_px", "Minimum patch", "px", 4, 64, 1, CHANGE_SUPPORT, "pixel"
+)
+# Same range as the change patch, but this one does not follow pixel size.
+_DARK_SUPPORT = _control("support_px", "Minimum patch", "px", 4, 64, 1, 8)
+_DARK = _control("dark_db", "Dark gate", "dB", 1, 6, 0.1, 2)
+_RING = _control("ring_db", "Ring contrast", "dB", 0.5, 4, 0.1, 1)
+_SHORE = _control("width_px", "Shoreline width", "px", 1, 5, 1, 1)
+_MATCH = _control("match_m", "Match distance", "m", 20, 300, 1, 80)
+_MIN_PIXELS = _control("min_pixels", "Minimum cluster", "px", 2, 32, 1, 4)
+
+TOOL_CONTROLS: dict[str, tuple[Control, ...]] = {
+    "open-water": (_WATER_GATE, _TEXTURE_WINDOW, _MAX_HOLE),
+    "sea-roughness": (_SPLIT,),
+    "built-up": (_BRIGHT_8,),
+    "returns-on-water": (_BRIGHT_8, _MIN_AREA),
+    "long-structure": (_BAND, _BRIGHT_6, _MIN_LENGTH),
+    "dwell-motion": (_SEARCH, _MOVE),
+    "amplitude-change": (_CHANGE, _CHANGE_SUPPORT),
+    "water-persistence": (_WATER_GATE,),
+    "sea-state": (_WATER_GATE,),
+    "dark-sea-anomaly": (_DARK, _DARK_SUPPORT, _RING),
+    "shoreline-series": (_SHORE,),
+    "date-of-change": (_CHANGE, _CHANGE_SUPPORT),
+    "repeat-returns": (_MATCH,),
+    "site-activity": (_BRIGHT_8, _MIN_PIXELS),
+    "stack-mean": (),
+}
+
+
+def suggested_value(
+    spec: Control, incidence: float | None, pixel_m: float | None
+) -> float:
+    """The number an omitted key uses for this scene."""
+
+    if spec.suggest == "incidence" and spec.default == 1.5:
+        return _suggest_incidence(spec.default, incidence, spec.maximum)
+    if spec.suggest == "pixel":
+        return _suggest_pixels(spec.default, pixel_m, spec.minimum, spec.maximum)
+    return spec.default
+
+
+def _suggest_incidence(
+    default: float, incidence: float | None, maximum: float
+) -> float:
+    """Keep 1.5 dB inside 26–34°. Add 0.5 dB per degree outside, then clamp."""
+
+    if incidence is None or not math.isfinite(incidence):
+        return default
+    if _INCIDENCE_LOW <= incidence <= _INCIDENCE_HIGH:
+        return default
+    if incidence < _INCIDENCE_LOW:
+        beyond = _INCIDENCE_LOW - incidence
+    else:
+        beyond = incidence - _INCIDENCE_HIGH
+    widened = default + _INCIDENCE_DB_PER_DEGREE * beyond
+    return min(widened, maximum)
+
+
+def _suggest_pixels(
+    default_px: float, pixel_m: float | None, low: float, high: float
+) -> float:
+    """Odd window nearest to ``default_px / pixel_m``, clamped to the range.
+
+    Missing overview metres keep ``default_px``, even when that default is
+    even. The ground length of the window then stays near ``default_px`` metres.
+    """
+
+    if pixel_m is None or not math.isfinite(pixel_m) or pixel_m <= 0:
+        return default_px
+    odd = _nearest_odd(default_px / pixel_m)
+    clamped = min(max(float(odd), low), high)
+    return float(round(clamped))
+
+
+def _nearest_odd(value: float) -> int:
+    """Odd integer closest to ``value``. An exact tie uses the lower odd."""
+
+    lower = math.floor(value)
+    if lower % 2 == 0:
+        left = lower - 1
+        right = lower + 1
+    else:
+        left = lower
+        right = lower + 2
+    if abs(value - left) <= abs(value - right):
+        return int(left)
+    return int(right)
+
+
+def resolve_controls(
+    tool_id: str,
+    overrides: Mapping[str, float] | None,
+    incidence: float | None,
+    pixel_m: float | None,
+) -> dict[str, float]:
+    """Use an override when the body sent it, otherwise the scene suggestion."""
+
+    provided = {} if overrides is None else overrides
+    resolved: dict[str, float] = {}
+    for spec in TOOL_CONTROLS[tool_id]:
+        if spec.id in provided:
+            resolved[spec.id] = float(provided[spec.id])
+        else:
+            resolved[spec.id] = suggested_value(spec, incidence, pixel_m)
+    return resolved
+
+
+def catalog_defaults(tool_id: str) -> dict[str, float]:
+    """The numbers written into today's sentences, before a scene moves them."""
+
+    return {spec.id: spec.default for spec in TOOL_CONTROLS[tool_id]}
+
+
+def control_payloads(
+    tool_id: str, incidence: float | None, pixel_m: float | None
+) -> tuple[dict[str, object], ...]:
+    """Sidebar fields. ``value`` is the suggestion for this scene."""
+
+    return tuple(
+        _control_public(spec, suggested_value(spec, incidence, pixel_m))
+        for spec in TOOL_CONTROLS[tool_id]
+    )
+
+
+def parse_control_overrides(tool_id: str, raw: object) -> dict[str, float]:
+    """Overrides from a job body. A missing object means no overrides.
+
+    An unknown key, a non-number, or a number outside the control's range
+    raises ``ControlError``. Pixel controls have to be whole numbers.
+    """
+
+    if raw is None:
+        return {}
+    if not isinstance(raw, dict):
+        raise ControlError("controls must be an object.")
+    specs = {spec.id: spec for spec in TOOL_CONTROLS[tool_id]}
+    parsed: dict[str, float] = {}
+    for key, value in raw.items():
+        if not isinstance(key, str) or key not in specs:
+            name = key if isinstance(key, str) else "controls"
+            raise ControlError(f"Unknown control {name}.")
+        parsed[key] = _control_number(specs[key], value)
+    return parsed
+
+
+def _control_number(spec: Control, value: object) -> float:
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise ControlError(
+            f"{spec.id} must be a number from {spec.minimum:g} to {spec.maximum:g}."
+        )
+    number = float(value)
+    if not math.isfinite(number) or number < spec.minimum or number > spec.maximum:
+        raise ControlError(
+            f"{spec.id} must be from {spec.minimum:g} to {spec.maximum:g}."
+        )
+    if spec.unit == "px" and not number.is_integer():
+        raise ControlError(
+            f"{spec.id} must be a whole number "
+            f"from {spec.minimum:g} to {spec.maximum:g}."
+        )
+    return number
+
+
+def _control_public(spec: Control, value: float) -> dict[str, object]:
+    return {
+        "id": spec.id,
+        "label": spec.label,
+        "unit": spec.unit,
+        "min": _public_number(spec.minimum),
+        "max": _public_number(spec.maximum),
+        "step": _public_number(spec.step),
+        "value": _public_number(value),
+    }
+
+
+def _public_number(value: float) -> int | float:
+    if float(value).is_integer():
+        return int(value)
+    return float(value)
+
+
+def _built_up_fraction(col_m: float, row_m: float) -> float:
+    """Pixel fraction whose ground area is 0.0005 of a 1 m pixel frame."""
+
+    pixel_area = col_m * row_m
+    if not math.isfinite(pixel_area) or pixel_area <= 0:
+        pixel_area = 1.0
+    return BUILT_UP_AREA_FRACTION / pixel_area
 
 
 @dataclass(frozen=True)
@@ -55,7 +323,13 @@ class _Extent:
     proj_max: float
 
 
-def water_mask(db: np.ndarray) -> tuple[np.ndarray, float]:
+def water_mask(
+    db: np.ndarray,
+    *,
+    water_gate_db: float = WATER_GATE_DB,
+    texture_window_px: int = TEXTURE_WINDOW,
+    max_hole_px: int = MAX_WATER_HOLE,
+) -> tuple[np.ndarray, float]:
     """Dark, smooth, connected water and the decibel level of that dark peak.
 
     The peak is the darkest histogram mode, not the most common brightness.
@@ -65,8 +339,11 @@ def water_mask(db: np.ndarray) -> tuple[np.ndarray, float]:
 
     Two scenes were painting the whole frame. A winding river left the city
     blocks as holes, and filling every hole painted the blocks. Tenerife's
-    smoothed strip spans a few tenths of a decibel, so the 1.5 dB gate
-    already included the island; texture separates that sea from the ridges.
+    smoothed strip spans a few tenths of a decibel, so the gate already
+    included the island; texture separates that sea from the ridges.
+    ``water_gate_db`` is that brightness gate. ``texture_window_px`` is the
+    window used when brightness cannot split the scene. ``max_hole_px`` is
+    the largest hole still filled as speckle.
     """
 
     smooth = ndimage.uniform_filter(db, size=5)
@@ -76,78 +353,42 @@ def water_mask(db: np.ndarray) -> tuple[np.ndarray, float]:
     mode = _dark_peak(finite)
     spread = float(np.percentile(finite, 90) - np.percentile(finite, 10))
     deviation = _local_deviation(db, smooth)
-    near = np.abs(smooth - mode) <= WATER_GATE_DB
+    near = np.abs(smooth - mode) <= water_gate_db
     speckle = float(np.median(deviation[near])) if np.any(near) else 1.0
     if not np.isfinite(speckle) or speckle <= 0:
         speckle = 1.0
-    texture_limit = None
-    if spread < WATER_GATE_DB:
+    window = max(int(texture_window_px), 1)
+    if spread < water_gate_db:
         # Brightness cannot split this scene. Calm water stays smoother
         # than land once the window is wider than speckle.
-        broad = ndimage.uniform_filter(db, size=TEXTURE_WINDOW)
-        texture = _local_deviation(db, broad, TEXTURE_WINDOW)
+        broad = ndimage.uniform_filter(db, size=window)
+        texture = _local_deviation(db, broad, window)
         finite_texture = texture[np.isfinite(texture)]
         floor = (
             float(np.percentile(finite_texture, 20)) if finite_texture.size else 0.05
         )
         if not np.isfinite(floor) or floor <= 0:
             floor = 0.05
+        # A wider texture window raises this floor on a ridge and leaves
+        # calm water under it. The gate above decides which path runs.
         texture_limit = floor * 2.0
         dark = (texture <= texture_limit) & np.isfinite(db)
-        path = "texture"
     else:
-        dark = (smooth <= mode + WATER_GATE_DB) & (deviation <= speckle * 2.0)
+        dark = (smooth <= mode + water_gate_db) & (deviation <= speckle * 2.0)
         dark &= np.isfinite(db)
-        path = "brightness"
     large = _large_components(dark, 0.005)
-    mask = _fill_small_holes(large, MAX_WATER_HOLE)
-    # region agent log
-    try:
-        import json
-        import time
-
-        payload = {
-            "sessionId": "2437e2",
-            "timestamp": int(time.time() * 1000),
-            "location": "measure.py:water_mask",
-            "message": "water mask stages",
-            "hypothesisId": "H-spread-and-holes",
-            "runId": "post-fix",
-            "data": {
-                "shape": [int(db.shape[0]), int(db.shape[1])],
-                "spread_db": round(spread, 4),
-                "mode_db": round(float(mode), 4),
-                "path": path,
-                "speckle_db": round(speckle, 4),
-                "texture_limit_db": None
-                if texture_limit is None
-                else round(float(texture_limit), 4),
-                "frac_dark": round(float(dark.mean()), 4),
-                "frac_large": round(float(large.mean()), 4),
-                "frac_final": round(float(mask.mean()), 4),
-                "holes_filled": int((mask & ~large).sum()),
-            },
-        }
-        with open(
-            "/home/gritter/Desktop/MainSideProjects/iceye-demo/.cursor/debug-2437e2.log",
-            "a",
-            encoding="utf-8",
-        ) as handle:
-            handle.write(json.dumps(payload) + "\n")
-    except Exception:
-        pass
-    # endregion
+    mask = _fill_small_holes(large, int(max_hole_px))
     return mask, mode
 
 
 def split_roughness(
-    db: np.ndarray, water: np.ndarray
+    db: np.ndarray, water: np.ndarray, *, split_db: float = 1.5
 ) -> tuple[np.ndarray, np.ndarray, str]:
     """Split water into calm and wind-roughened. A flat sea stays one class.
 
     The 10th-to-90th spread is the first gate. After a median cut, halves
-    whose medians differ by less than 1.5 dB are still one sea: the spread
-    was the tails, not two classes.
+    whose medians differ by less than ``split_db`` are still one sea: the
+    spread was the tails, not two classes. The split is not a wave height.
     """
 
     calm = np.zeros(db.shape, dtype=bool)
@@ -160,11 +401,12 @@ def split_roughness(
             "The water mask is empty, so there is no sea state to split.",
         )
     spread = float(np.percentile(values, 90) - np.percentile(values, 10))
-    if spread < 1.5:
+    gate = f"{split_db:g}"
+    if spread < split_db:
         return (
             water.copy(),
             rough,
-            "The water spans less than 1.5 dB, so it is drawn as one class.",
+            f"The water spans less than {gate} dB, so it is drawn as one class.",
         )
     middle = float(np.median(values))
     calm = water & (db <= middle)
@@ -174,22 +416,35 @@ def split_roughness(
     if calm_values.size and rough_values.size:
         calm_median = float(np.median(calm_values))
         rough_median = float(np.median(rough_values))
-        # A 0.9 dB gap between the halves is not a wind split.
-        if abs(calm_median - rough_median) < 1.5:
+        # A gap under the split is not a wind split.
+        if abs(calm_median - rough_median) < split_db:
             return (
                 water.copy(),
                 np.zeros(db.shape, dtype=bool),
-                "The two classes differ by less than 1.5 dB, "
+                f"The two classes differ by less than {gate} dB, "
                 "so the water is drawn as one class.",
             )
     return calm, rough, f"The split is the median water return, {middle:.1f} dB."
 
 
-def built_up_mask(db: np.ndarray, water: np.ndarray, mode_db: float) -> np.ndarray:
-    """Bright clusters on land. Water is excluded so a hull is not a building."""
+def built_up_mask(
+    db: np.ndarray,
+    water: np.ndarray,
+    mode_db: float,
+    *,
+    bright_offset_db: float = 8.0,
+    col_m: float = 1.0,
+    row_m: float = 1.0,
+) -> np.ndarray:
+    """Bright clusters on land. Water is excluded so a hull is not a building.
 
-    bright = np.isfinite(db) & ~water & (db >= mode_db + 8.0)
-    return _large_components(bright, 0.0005)
+    ``bright_offset_db`` is how far above the water mode a land pixel must
+    sit. The minimum cluster is a ground area, not a fraction of the
+    overview that happened to be loaded.
+    """
+
+    bright = np.isfinite(db) & ~water & (db >= mode_db + bright_offset_db)
+    return _large_components(bright, _built_up_fraction(col_m, row_m))
 
 
 def long_structure(
@@ -198,24 +453,33 @@ def long_structure(
     mode_db: float,
     col_m: float,
     row_m: float,
+    *,
+    band_m: float = 150.0,
+    bright_offset_db: float = 6.0,
+    min_length_m: float = 200.0,
 ) -> Component | None:
     """The longest bright component along the water, when it is clearly long.
 
-    Length is the end-to-end axis of the bright return. The 150 m band is
-    where that return is found. A corridor may then follow the same axis
-    past the band, and is kept only while the return stays thin.
+    Length is the end-to-end axis of the bright return. ``band_m`` is where
+    that return is found. A corridor may then follow the same axis past the
+    band, and is kept only while the return stays thin. The length still
+    has to clear forty overview pixels, so a coarse pixel cannot report a
+    short streak as a long structure.
     """
 
     pixel_m = min(col_m, row_m)
     if pixel_m <= 0:
         return None
     distance = ndimage.distance_transform_edt(~water) * pixel_m
-    band = (distance > 0) & (distance <= 150) & (db >= mode_db + 6.0)
+    band = (distance > 0) & (distance <= band_m) & (db >= mode_db + bright_offset_db)
     band = ndimage.binary_closing(band, iterations=1)
-    chosen = _longest(db, band, col_m, row_m, min_length_m=max(200.0, pixel_m * 40))
+    floor_m = max(min_length_m, pixel_m * 40)
+    chosen = _longest(db, band, col_m, row_m, min_length_m=floor_m)
     if chosen is None:
         return None
-    return _extend_corridor(db, chosen, mode_db, col_m, row_m)
+    return _extend_corridor(
+        db, chosen, mode_db, col_m, row_m, bright_offset_db=bright_offset_db
+    )
 
 
 def waterline_returns(
@@ -225,22 +489,27 @@ def waterline_returns(
     col_m: float,
     row_m: float,
     excluded: np.ndarray | None = None,
+    *,
+    bright_offset_db: float = 8.0,
+    min_area_m2: float = 20.0,
 ) -> list[Component]:
     """Compact bright components that touch the water.
 
     A component counts when at least one pixel is within one overview pixel
     of the water mask. The brightest 24 are a last bound after that test,
-    not the test that drops the hillside.
+    not the test that drops the hillside. Four overview pixels remain the
+    area floor, so ``min_area_m2`` cannot count a smaller patch.
     """
 
     pixel_m = max(min(col_m, row_m), 1e-3)
     distance = ndimage.distance_transform_edt(~water) * pixel_m
-    bright = (db >= mode_db + 8.0) & np.isfinite(db)
+    bright = (db >= mode_db + bright_offset_db) & np.isfinite(db)
     if excluded is not None:
         bright &= ~excluded
     labels, count = ndimage.label(bright)
     found: list[Component] = []
-    minimum = max(20.0, pixel_m * pixel_m * 4)
+    # Four overview pixels is the floor under whatever area the control set.
+    minimum = max(min_area_m2, pixel_m * pixel_m * 4)
     for index, window in enumerate(ndimage.find_objects(labels), start=1):
         if window is None or index > count:
             continue
@@ -279,17 +548,20 @@ def track_returns(
     col_scale: float,
     pixel_m: float,
     dwell_s: float,
+    *,
+    search_radius_px: int = 6,
+    move_gate_m: float = 20.0,
 ) -> list[dict[str, object]]:
     """Follow each centre across the dwell. Displacement uses the first and last hit.
 
     Every frame is searched in the window around the original centre.
     Recentering on the peak crawls along a bright ridge and paints that
     ridge as motion. A track is moved only when first-to-last displacement
-    clears the gate.
+    clears the gate. Four overview pixels remain the floor under that gate.
     """
 
     frames = int(video.shape[0])
-    radius = 6
+    radius = int(search_radius_px)
     tracks: list[dict[str, object]] = []
     for row, col in centres:
         origin_row = row * row_scale
@@ -321,7 +593,7 @@ def track_returns(
         displacement = float(
             np.hypot((end[0] - start[0]) * pixel_m, (end[1] - start[1]) * pixel_m)
         )
-        moved = displacement >= max(20.0, pixel_m * 4)
+        moved = displacement >= max(move_gate_m, pixel_m * 4)
         speed = displacement / dwell_s if dwell_s > 0 else 0.0
         tracks.append(
             {
@@ -335,29 +607,35 @@ def track_returns(
 
 
 def change_masks(
-    earlier: np.ndarray, later: np.ndarray
+    earlier: np.ndarray,
+    later: np.ndarray,
+    *,
+    change_db: float = CHANGE_DB,
+    support_px: int = CHANGE_SUPPORT,
 ) -> tuple[np.ndarray, np.ndarray]:
     """Later-darker and later-brighter masks.
 
-    A difference under 3 dB is excluded from both masks, and so is a patch
-    under 8 pixels. The picture is a separate ungated composite.
+    A difference under ``change_db`` is excluded from both masks, and so is
+    a patch under ``support_px`` pixels. The picture is a separate ungated
+    composite, so it may still colour a weaker difference than these counts.
     """
 
     delta = later - earlier
     valid = np.isfinite(earlier) & np.isfinite(later)
-    darker = valid & (delta <= -CHANGE_DB)
-    brighter = valid & (delta >= CHANGE_DB)
-    return _supported(darker), _supported(brighter)
+    darker = valid & (delta <= -change_db)
+    brighter = valid & (delta >= change_db)
+    support = int(support_px)
+    return _supported(darker, support), _supported(brighter, support)
 
 
-def _supported(mask: np.ndarray) -> np.ndarray:
-    """Drop a change patch smaller than ``CHANGE_SUPPORT`` pixels."""
+def _supported(mask: np.ndarray, support_px: int = CHANGE_SUPPORT) -> np.ndarray:
+    """Drop a change patch smaller than ``support_px`` pixels."""
 
     labels, count = ndimage.label(mask)
     if count == 0:
         return np.zeros(mask.shape, dtype=bool)
     counts = np.bincount(labels.ravel())
-    keep = counts >= CHANGE_SUPPORT
+    keep = counts >= support_px
     keep[0] = False
     return cast(np.ndarray, keep[labels])
 
@@ -494,6 +772,8 @@ def _extend_corridor(
     mode_db: float,
     col_m: float,
     row_m: float,
+    *,
+    bright_offset_db: float = 6.0,
 ) -> Component:
     """Walk the axis past the shoreline band and keep the run only if it stays thin.
 
@@ -507,7 +787,7 @@ def _extend_corridor(
 
     rows, cols = np.nonzero(component.mask)
     extent = _end_to_end(rows, cols, row_m, col_m)
-    extra = _corridor_pixels(db, extent, mode_db + 6.0, col_m, row_m)
+    extra = _corridor_pixels(db, extent, mode_db + bright_offset_db, col_m, row_m)
     if not np.any(extra):
         return component
     union = component.mask | extra

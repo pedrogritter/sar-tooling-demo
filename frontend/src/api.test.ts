@@ -118,6 +118,27 @@ describe("scene api", () => {
     expect(body.partner_id).toBeNull()
   })
 
+  it("posts the sidebar controls when the pane sends them", async () => {
+    fetchMock.mockResolvedValue(
+      jsonResponse({ job_id: "job-3", status: "running" }, 202)
+    )
+
+    await startAnalysisJob("ICEYE_TEST", "open-water", null, {
+      water_gate_db: 2,
+      texture_window_px: 11,
+      max_hole_px: 32,
+    })
+
+    const body = JSON.parse(String(fetchMock.mock.calls[0][1].body)) as {
+      controls: Record<string, number>
+    }
+    expect(body.controls).toEqual({
+      water_gate_db: 2,
+      texture_window_px: 11,
+      max_hole_px: 32,
+    })
+  })
+
   it("turns an analysis 409 into a conflict error", async () => {
     fetchMock.mockResolvedValue(jsonResponse({ status: "running" }, 409))
 

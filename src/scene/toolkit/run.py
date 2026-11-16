@@ -1,9 +1,9 @@
-"""Run one belt tool and write its picture, measurement, and briefing."""
+"""Run one toolkit tool and write its picture, measurement, and briefing."""
 
 from __future__ import annotations
 
 import json
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 
 import numpy as np
@@ -12,12 +12,18 @@ from PIL import Image
 from scene.grid import Grid
 from scene.paths import scene_dir
 
-from .catalog import analysis_dir, tool_spec, tools_for_scene
+from .catalog import analysis_dir, scene_gates, tool_spec, tools_for_scene
 from .geometry import warp_affine
 from .measure import (
+    CHANGE_DB,
+    CHANGE_SUPPORT,
+    MAX_WATER_HOLE,
+    TEXTURE_WINDOW,
+    WATER_GATE_DB,
     built_up_mask,
     change_masks,
     long_structure,
+    resolve_controls,
     split_roughness,
     track_returns,
     water_mask,
@@ -136,6 +142,32 @@ LIMITS = {
 }
 
 
+def limit_for(tool_id: str, values: Mapping[str, float] | None = None) -> str:
+    """The limit stored for this run.
+
+    Defaults that were not moved keep today's sentence. A control that
+    changes a number already in that sentence rewrites the number. Every
+    other clause, including each "this is not" clause, stays.
+    """
+
+    text = LIMITS[tool_id]
+    if tool_id not in {"amplitude-change", "date-of-change"} or values is None:
+        return text
+    change = float(values["change_db"])
+    support = float(values["support_px"])
+    if change == CHANGE_DB and support == CHANGE_SUPPORT:
+        return text
+    return text.replace("3 dB", f"{change:g} dB").replace(
+        "8 pixels", f"{support:g} pixels"
+    )
+
+
+def _pick(values: Mapping[str, float] | None, key: str, default: float) -> float:
+    if values is None:
+        return default
+    return float(values[key])
+
+
 @dataclass(frozen=True)
 class Frame:
     scene_id: str
@@ -198,49 +230,81 @@ def run_tool(
     tool_id: str,
     on_step: OnStep,
     partner_id: str | None = None,
+    controls: Mapping[str, float] | None = None,
 ) -> None:
-    """Run one tool for ``scene_id``. A locked tool raises with its sentence."""
+    """Run one tool for ``scene_id``. A locked tool raises with its sentence.
+
+    Omitted control keys use the scene suggestion. The report calls this
+    with no overrides, so it agrees with a sidebar that posts those values.
+    """
 
     spec = tool_spec(tool_id)
     views = {item.id: item for item in tools_for_scene(scene_id)}
     view = views[tool_id]
     if view.locked:
         raise RuntimeError(view.reason)
+    incidence, pixel_m = scene_gates(scene_id)
+    values = resolve_controls(tool_id, controls, incidence, pixel_m)
     if spec.kind == "pair":
         if not partner_id or partner_id not in view.partners:
             raise RuntimeError(
                 "Choose a second scene with the same orbit direction and look side."
             )
-        _run_change(scene_id, partner_id, on_step)
+        _run_change(scene_id, partner_id, on_step, values)
         return
     if spec.kind in {"stack", "stack-mean"}:
-        _run_stack(scene_id, tool_id, view.partners, on_step)
+        _run_stack(scene_id, tool_id, view.partners, on_step, values)
         return
     if tool_id == "dwell-motion":
-        _run_motion(scene_id, on_step)
+        _run_motion(scene_id, on_step, values)
         return
-    _run_single(scene_id, tool_id, on_step)
+    _run_single(scene_id, tool_id, on_step, values)
 
 
-def _run_single(scene_id: str, tool_id: str, on_step: OnStep) -> None:
+def _run_single(
+    scene_id: str, tool_id: str, on_step: OnStep, values: Mapping[str, float]
+) -> None:
     sentences = step_sentences(tool_id)
     on_step(1, sentences[0])
     frame = _load_frame(scene_id)
     on_step(2, sentences[1])
-    water, mode = water_mask(frame.db)
+    water, mode = _water(frame.db, values)
     on_step(3, sentences[2])
-    summary, layers, strokes, legend = _single_layers(tool_id, frame, water, mode)
+    summary, layers, strokes, legend = _single_layers(
+        tool_id, frame, water, mode, values
+    )
     on_step(4, sentences[3])
     gray = stretch(frame.db, frame.low, frame.high)
+    limit = limit_for(tool_id, values)
     legend = [
         f"Backdrop is sigma-nought, {frame.low:.0f} to {frame.high:.0f} dB, "
         "2nd to 98th percentile.",
         *legend,
-        LIMITS[tool_id],
+        limit,
     ]
     image = render(gray, layers, strokes, legend)
     on_step(5, sentences[4])
-    _write(scene_id, tool_id, None, summary, legend, image, LIMITS[tool_id])
+    _write(scene_id, tool_id, None, summary, legend, image, limit)
+
+
+def _water(db: np.ndarray, values: Mapping[str, float]) -> tuple[np.ndarray, float]:
+    """Water mask using only the gates this tool's controls actually name.
+
+    A tool that does not state the texture window or the hole size keeps
+    today's constants. Those are not suggested for a tool that does not
+    list them.
+    """
+
+    gate = values["water_gate_db"] if "water_gate_db" in values else WATER_GATE_DB
+    window = (
+        int(values["texture_window_px"])
+        if "texture_window_px" in values
+        else TEXTURE_WINDOW
+    )
+    hole = int(values["max_hole_px"]) if "max_hole_px" in values else MAX_WATER_HOLE
+    return water_mask(
+        db, water_gate_db=gate, texture_window_px=window, max_hole_px=hole
+    )
 
 
 def _single_layers(
@@ -248,6 +312,7 @@ def _single_layers(
     frame: Frame,
     water: np.ndarray,
     mode: float,
+    values: Mapping[str, float] | None = None,
 ) -> tuple[
     list[dict[str, str]],
     list[MaskLayer],
@@ -273,7 +338,9 @@ def _single_layers(
             ["Blue: open water."],
         )
     if tool_id == "sea-roughness":
-        calm, rough, note = split_roughness(frame.db, water)
+        calm, rough, note = split_roughness(
+            frame.db, water, split_db=_pick(values, "split_db", 1.5)
+        )
         if "one class" in note:
             return (
                 [
@@ -297,7 +364,14 @@ def _single_layers(
             ["Dark blue: below the median.", "Light blue: above the median.", note],
         )
     if tool_id == "built-up":
-        built = built_up_mask(frame.db, water, mode)
+        built = built_up_mask(
+            frame.db,
+            water,
+            mode,
+            bright_offset_db=_pick(values, "bright_offset_db", 8.0),
+            col_m=frame.col_m,
+            row_m=frame.row_m,
+        )
         land = max(float((~water).sum()) * frame.col_m * frame.row_m, 1.0)
         built_area = float(built.sum()) * frame.col_m * frame.row_m
         labels, count = _count_parts(built)
@@ -307,7 +381,21 @@ def _single_layers(
         ]
         del labels
         return summary, [MaskLayer(built, BUILT)], [], ["Warm tint: built-up return."]
-    structure = long_structure(frame.db, water, mode, frame.col_m, frame.row_m)
+    if tool_id == "long-structure":
+        structure = long_structure(
+            frame.db,
+            water,
+            mode,
+            frame.col_m,
+            frame.row_m,
+            band_m=_pick(values, "band_m", 150.0),
+            bright_offset_db=_pick(values, "bright_offset_db", 6.0),
+            min_length_m=_pick(values, "min_length_m", 200.0),
+        )
+    else:
+        # Returns on water excludes a long structure found at that tool's
+        # own defaults. This tool's bright offset does not move that search.
+        structure = long_structure(frame.db, water, mode, frame.col_m, frame.row_m)
     excluded = structure.mask if structure is not None else None
     if tool_id == "long-structure":
         strokes: list[Stroke] = []
@@ -327,14 +415,23 @@ def _single_layers(
             legend = ["Amber line: long bright structure."]
         return summary, [], strokes, legend
     returns = waterline_returns(
-        frame.db, water, mode, frame.col_m, frame.row_m, excluded
+        frame.db,
+        water,
+        mode,
+        frame.col_m,
+        frame.row_m,
+        excluded,
+        bright_offset_db=_pick(values, "bright_offset_db", 8.0),
+        min_area_m2=_pick(values, "min_area_m2", 20.0),
     )
     summary = [{"label": "Bright returns", "value": str(len(returns))}]
     strokes = [Stroke(((item.col, item.row),), MARK) for item in returns]
     return summary, [], strokes, ["Cyan marker: bright return."]
 
 
-def _run_motion(scene_id: str, on_step: OnStep) -> None:
+def _run_motion(
+    scene_id: str, on_step: OnStep, values: Mapping[str, float]
+) -> None:
     sentences = step_sentences("dwell-motion")
     on_step(1, sentences[0])
     frame = _load_frame(scene_id)
@@ -360,7 +457,14 @@ def _run_motion(scene_id: str, on_step: OnStep) -> None:
         centres.append((row, col))
     on_step(4, sentences[3])
     tracks = track_returns(
-        video, centres, 1.0, 1.0, min(frame.col_m, frame.row_m), dwell_s
+        video,
+        centres,
+        1.0,
+        1.0,
+        min(frame.col_m, frame.row_m),
+        dwell_s,
+        search_radius_px=int(values["search_radius_px"]),
+        move_gate_m=values["move_gate_m"],
     )
     on_step(5, sentences[4])
     strokes: list[Stroke] = []
@@ -390,16 +494,24 @@ def _run_motion(scene_id: str, on_step: OnStep) -> None:
         f"Backdrop is sigma-nought, {frame.low:.0f} to {frame.high:.0f} dB.",
         "Cyan track: stationary during the dwell.",
         "Red track: moved during the dwell.",
-        LIMITS["dwell-motion"],
+        limit_for("dwell-motion", values),
     ]
     image = render(stretch(frame.db, frame.low, frame.high), [], strokes, legend)
     on_step(6, sentences[5])
     _write(
-        scene_id, "dwell-motion", None, summary, legend, image, LIMITS["dwell-motion"]
+        scene_id,
+        "dwell-motion",
+        None,
+        summary,
+        legend,
+        image,
+        limit_for("dwell-motion", values),
     )
 
 
-def _run_change(scene_id: str, partner_id: str, on_step: OnStep) -> None:
+def _run_change(
+    scene_id: str, partner_id: str, on_step: OnStep, values: Mapping[str, float]
+) -> None:
     sentences = step_sentences("amplitude-change")
     on_step(1, sentences[0])
     primary = _load_frame(scene_id)
@@ -418,7 +530,12 @@ def _run_change(scene_id: str, partner_id: str, on_step: OnStep) -> None:
     )
     earlier, later, earlier_id, later_id = _order(primary, other, warped)
     on_step(3, sentences[2])
-    darker, brighter = change_masks(earlier, later)
+    darker, brighter = change_masks(
+        earlier,
+        later,
+        change_db=values["change_db"],
+        support_px=int(values["support_px"]),
+    )
     pixel_area = primary.col_m * primary.row_m
     on_step(4, sentences[3])
     low, high = percentile_range(np.concatenate([earlier.ravel(), later.ravel()]))
@@ -431,7 +548,7 @@ def _run_change(scene_id: str, partner_id: str, on_step: OnStep) -> None:
             f"Shared stretch {low:.0f} to {high:.0f} dB.",
             f"Red: {earlier_id} (earlier). Cyan: {later_id} (later).",
             "Red has fled. Cyan is new.",
-            LIMITS["amplitude-change"],
+            limit_for("amplitude-change", values),
         ],
     )
     stable = ~darker & ~brighter & np.isfinite(earlier) & np.isfinite(later)
@@ -461,7 +578,7 @@ def _run_change(scene_id: str, partner_id: str, on_step: OnStep) -> None:
         summary,
         ["Red has fled. Cyan is new."],
         image,
-        LIMITS["amplitude-change"],
+        limit_for("amplitude-change", values),
     )
 
 
@@ -470,6 +587,7 @@ def _run_stack(
     tool_id: str,
     partners: tuple[str, ...],
     on_step: OnStep,
+    values: Mapping[str, float],
 ) -> None:
     sentences = step_sentences(tool_id)
     on_step(1, sentences[0])
@@ -509,10 +627,13 @@ def _run_stack(
     frames = [frames[index] for index in order]
     aligned = [aligned[index] for index in order]
     gray = stretch(primary.db, primary.low, primary.high)
-    image, summary, legend = _stack_picture(tool_id, primary, frames, aligned, gray)
+    limit = limit_for(tool_id, values)
+    image, summary, legend = _stack_picture(
+        tool_id, primary, frames, aligned, gray, values, limit
+    )
     on_step(4, sentences[3])
     on_step(5, sentences[4])
-    _write(scene_id, tool_id, None, summary, legend, image, LIMITS[tool_id])
+    _write(scene_id, tool_id, None, summary, legend, image, limit)
 
 
 def _stack_picture(
@@ -521,8 +642,10 @@ def _stack_picture(
     frames: list[Frame],
     aligned: list[np.ndarray],
     gray: np.ndarray,
+    values: Mapping[str, float],
+    limit: str,
 ) -> tuple[Image.Image, list[dict[str, str]], list[str]]:
-    masks = [water_mask(frame)[0] for frame in aligned]
+    masks = [_water(frame, values)[0] for frame in aligned]
     modes = [frame_mode(frame) for frame in aligned]
     dates = [_short_date(frame.collected_at) for frame in frames]
     legend = [f"Stack of {len(frames)} dates, same orbit direction and look side."]
@@ -533,7 +656,7 @@ def _stack_picture(
             {"label": "Mean water fraction", "value": f"{float(fraction.mean()):.3f}"},
         ]
         image = _fraction_image(gray, fraction, WATER)
-        legend += ["Blue strength: water on N of M dates.", LIMITS[tool_id]]
+        legend += ["Blue strength: water on N of M dates.", limit]
         return with_legend(image, legend), summary, legend
     if tool_id == "sea-state":
         levels = sea_state(aligned, masks)
@@ -544,39 +667,62 @@ def _stack_picture(
         base = render(
             gray, [MaskLayer(masks[frames.index(primary)], WATER, 0.25)], [], []
         )
-        legend += [LIMITS[tool_id]]
+        legend += [limit]
         return attach_bars(with_legend(base, legend), dates, levels), summary, legend
     if tool_id == "dark-sea-anomaly":
         median = stack_median(aligned)
         water, _mode = water_mask(primary.db)
-        anomaly = dark_anomaly(primary.db, median, water)
+        anomaly = dark_anomaly(
+            primary.db,
+            median,
+            water,
+            dark_db=values["dark_db"],
+            support_px=int(values["support_px"]),
+            ring_db=values["ring_db"],
+        )
         summary = [{"label": "Anomaly area", "value": _km2(anomaly, primary)}]
         legend += [
             "Yellow: dark sea anomaly on this date.",
-            LIMITS[tool_id],
+            limit,
         ]
         image = render(gray, [MaskLayer(anomaly, ANOMALY, 0.55)], [], legend)
         return image, summary, legend
     if tool_id == "shoreline-series":
+        width = int(values["width_px"])
         layers = [
-            MaskLayer(shoreline(mask), DATE_COLORS[index % len(DATE_COLORS)], 0.9)
+            MaskLayer(
+                shoreline(mask, width_px=width),
+                DATE_COLORS[index % len(DATE_COLORS)],
+                0.9,
+            )
             for index, mask in enumerate(masks)
         ]
         summary = [{"label": "Dates", "value": str(len(frames))}]
-        legend += [LIMITS[tool_id]]
+        legend += [limit]
         return render(gray, layers, [], legend), summary, legend
     if tool_id == "date-of-change":
-        which, keep = date_of_change(aligned)
+        which, keep = date_of_change(
+            aligned,
+            change_db=values["change_db"],
+            support_px=int(values["support_px"]),
+        )
         summary = [{"label": "Changed fraction", "value": f"{float(keep.mean()):.3f}"}]
         image = _index_image(gray, which, keep)
         legend += [
             f"{DATE_COLORS[index % len(DATE_COLORS)]}: {dates[index]}"
             for index in range(len(dates))
         ]
-        legend.append(LIMITS[tool_id])
+        legend.append(limit)
         return with_legend(image, legend), summary, legend
     if tool_id == "repeat-returns":
-        counted = repeat_counts(aligned, masks, modes, primary.col_m, primary.row_m)
+        counted = repeat_counts(
+            aligned,
+            masks,
+            modes,
+            primary.col_m,
+            primary.row_m,
+            match_m=values["match_m"],
+        )
         once = sum(1 for _row, _col, count in counted if count == 1)
         many = sum(1 for _row, _col, count in counted if count > 1)
         strokes = [
@@ -593,13 +739,19 @@ def _stack_picture(
         legend += [
             "Cyan: one date.",
             "Red: many dates.",
-            LIMITS[tool_id],
+            limit,
         ]
         return render(gray, [], strokes, legend), summary, legend
     if tool_id == "site-activity":
         median = stack_median(aligned)
         mode = frame_mode(primary.db)
-        appeared, left = site_activity(primary.db, median, mode)
+        appeared, left = site_activity(
+            primary.db,
+            median,
+            mode,
+            bright_offset_db=values["bright_offset_db"],
+            min_pixels=int(values["min_pixels"]),
+        )
         summary = [
             {"label": "New bright area", "value": _km2(appeared, primary)},
             {"label": "Missing bright area", "value": _km2(left, primary)},
@@ -607,7 +759,7 @@ def _stack_picture(
         legend += [
             "Cyan: new on this date.",
             "Red: missing on this date.",
-            LIMITS[tool_id],
+            limit,
         ]
         image = render(
             gray,
@@ -622,7 +774,7 @@ def _stack_picture(
     legend = [
         f"Mean sigma-nought, {low:.0f} to {high:.0f} dB.",
         f"{len(frames)} dates averaged.",
-        LIMITS[tool_id],
+        limit,
     ]
     image = render(stretch(mean, low, high), [], [], legend)
     return image, summary, legend

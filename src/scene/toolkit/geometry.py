@@ -15,7 +15,7 @@ MIN_OVERLAP = 0.3
 
 @dataclass(frozen=True)
 class Collect:
-    """Geometry and files the belt needs from one scene folder."""
+    """Geometry and files the toolkit needs from one scene folder."""
 
     scene_id: str
     collected_at: str

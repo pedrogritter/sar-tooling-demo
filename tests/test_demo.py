@@ -8,7 +8,6 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from scene.belt.catalog import tools_for_scene
 from scene.demo import (
     PlaceholderMissing,
     SeedRasterError,
@@ -21,8 +20,9 @@ from scene.library import list_library
 from scene.loader import load_scene
 from scene.paths import LISBON_SCENE_ID
 from scene.quicklook import render_quicklook_png
+from scene.toolkit.catalog import tools_for_scene
 from scene.web import build_state, dispatch
-from tests.test_belt import _rooted
+from tests.test_toolkit import _rooted
 
 
 class DemoSeedTest(unittest.TestCase):
@@ -127,7 +127,7 @@ class DemoSeedTest(unittest.TestCase):
 
             listed = list_library(dest)
             self.assertTrue(listed[0]["placeholder"])
-            with patch("scene.belt.catalog.scene_dir", _rooted(dest)):
+            with patch("scene.toolkit.catalog.scene_dir", _rooted(dest)):
                 views = {item.id: item for item in tools_for_scene(LISBON_SCENE_ID)}
             water = views["open-water"]
             self.assertTrue(water.locked)

@@ -4,7 +4,7 @@ import { MeasureCard } from "@/scene/MeasureCard"
 import { savedToolResult, summaryFromMeasurement } from "@/scene/placeholder"
 import { analysisRunDisabled } from "@/scene/stage"
 import { useAnalysisJob } from "@/scene/use-analysis-job"
-import type { AnalysisTool, JobResult } from "@/types"
+import type { AnalysisTool, JobResult, ToolControl } from "@/types"
 
 interface AnalysisPaneProps {
   sceneId: string | null
@@ -25,6 +25,7 @@ export function AnalysisPane({
   onResult,
 }: AnalysisPaneProps) {
   const [partnerChoice, setPartnerChoice] = useState<string | null>(null)
+  const [controlDraft, setControlDraft] = useState<Record<string, string>>({})
   const [loadedScene, setLoadedScene] = useState(sceneId)
   const job = useAnalysisJob(onResult)
   const tool = tools.find((item) => item.id === toolId) ?? null
@@ -37,6 +38,7 @@ export function AnalysisPane({
   if (sceneId !== loadedScene) {
     setLoadedScene(sceneId)
     setPartnerChoice(null)
+    setControlDraft({})
   }
 
   useEffect(() => {
@@ -103,6 +105,37 @@ export function AnalysisPane({
           {tool.partners.length === 1 ? "scene" : "scenes"}.
         </p>
       ) : null}
+      {(tool?.controls ?? []).length > 0 ? (
+        <div className="flex flex-col gap-2">
+          {(tool?.controls ?? []).map((control) => (
+            <label
+              key={control.id}
+              className="flex flex-col gap-1 text-sm"
+              htmlFor={controlFieldId(toolId, control.id)}
+            >
+              {control.label}
+              {control.unit ? ` (${control.unit})` : ""}
+              <input
+                id={controlFieldId(toolId, control.id)}
+                name={control.id}
+                type="number"
+                className="rounded-md border bg-background px-2 py-1.5 text-sm"
+                min={control.min}
+                max={control.max}
+                step={control.step}
+                value={controlText(control, controlDraft)}
+                onChange={(event) => {
+                  const next = event.target.value
+                  setControlDraft((current) => ({
+                    ...current,
+                    [control.id]: next,
+                  }))
+                }}
+              />
+            </label>
+          ))}
+        </div>
+      ) : null}
       <MeasureCard
         snapshot={job.snapshot}
         isRunning={job.isRunning}
@@ -119,7 +152,8 @@ export function AnalysisPane({
           void job.start(
             sceneId,
             toolId,
-            tool?.needs_partner ? partnerId : null
+            tool?.needs_partner ? partnerId : null,
+            postedControls(tool, controlDraft)
           )
         }}
       />
@@ -143,4 +177,33 @@ export function AnalysisPane({
       ) : null}
     </div>
   )
+}
+
+function controlFieldId(toolId: string, controlId: string): string {
+  return `analysis-${toolId}-${controlId}`
+}
+
+/** The suggestion until the person types. An empty field posts NaN and is rejected. */
+function controlText(
+  control: ToolControl,
+  draft: Record<string, string>
+): string {
+  if (Object.prototype.hasOwnProperty.call(draft, control.id)) {
+    return draft[control.id]
+  }
+
+  return String(control.value)
+}
+
+function postedControls(
+  tool: AnalysisTool | null,
+  draft: Record<string, string>
+): Record<string, number> {
+  const posted: Record<string, number> = {}
+
+  for (const control of tool?.controls ?? []) {
+    posted[control.id] = Number(controlText(control, draft))
+  }
+
+  return posted
 }

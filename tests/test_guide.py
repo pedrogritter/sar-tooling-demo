@@ -1,4 +1,4 @@
-"""GET /api/guide quotes the belt limits and does not call a model."""
+"""GET /api/guide quotes the toolkit limits and does not call a model."""
 
 from __future__ import annotations
 
@@ -6,11 +6,11 @@ import json
 import unittest
 from pathlib import Path
 
-from scene.belt.catalog import TOOLS
-from scene.belt.run import LIMITS
 from scene.guide import guide_payload
 from scene.jobs import MeasurementJobManager
 from scene.paths import project_root
+from scene.toolkit.catalog import TOOLS
+from scene.toolkit.run import LIMITS
 from scene.web import dispatch
 
 READ_GRD = (

@@ -7,7 +7,13 @@ from typing import cast
 import numpy as np
 from scipy import ndimage
 
-from scene.belt.measure import CHANGE_DB, change_masks, water_mask, waterline_returns
+from scene.toolkit.measure import (
+    CHANGE_DB,
+    CHANGE_SUPPORT,
+    change_masks,
+    water_mask,
+    waterline_returns,
+)
 
 
 def persistence(masks: list[np.ndarray]) -> np.ndarray:
@@ -33,42 +39,55 @@ def sea_state(frames: list[np.ndarray], masks: list[np.ndarray]) -> list[float |
 
 
 def dark_anomaly(
-    frame: np.ndarray, median: np.ndarray, water: np.ndarray
+    frame: np.ndarray,
+    median: np.ndarray,
+    water: np.ndarray,
+    *,
+    dark_db: float = 2.0,
+    support_px: int = 8,
+    ring_db: float = 1.0,
 ) -> np.ndarray:
     """A dark patch inside water that is darker than the stack median sea.
 
-    The ring around the patch has to be brighter than the patch, so a sea
-    that is dark everywhere does not become an anomaly.
+    The ring around the patch has to be brighter than the patch by
+    ``ring_db``, so a sea that is dark everywhere does not become an
+    anomaly. The title stays dark sea anomaly.
     """
 
     sea = np.isfinite(frame) & np.isfinite(median) & water
-    candidate = sea & (frame <= median - 2.0)
+    candidate = sea & (frame <= median - dark_db)
     labels, count = ndimage.label(candidate)
     keep = np.zeros(frame.shape, dtype=bool)
     for index in range(1, count + 1):
         component = labels == index
-        if int(component.sum()) < 8:
+        if int(component.sum()) < int(support_px):
             continue
         ring = ndimage.binary_dilation(component, iterations=2) & ~component & sea
         if not ring.any():
             continue
-        if float(np.mean(frame[ring])) > float(np.mean(frame[component])) + 1.0:
+        if float(np.mean(frame[ring])) > float(np.mean(frame[component])) + ring_db:
             keep |= component
     return keep
 
 
-def shoreline(mask: np.ndarray) -> np.ndarray:
-    """The one-pixel boundary of a water mask."""
+def shoreline(mask: np.ndarray, *, width_px: int = 1) -> np.ndarray:
+    """The water-mask boundary, ``width_px`` pixels wide. One pixel is the default."""
 
-    eroded = ndimage.binary_erosion(mask)
+    eroded = ndimage.binary_erosion(mask, iterations=max(int(width_px), 1))
     return cast(np.ndarray, mask & ~eroded)
 
 
-def date_of_change(frames: list[np.ndarray]) -> tuple[np.ndarray, np.ndarray]:
+def date_of_change(
+    frames: list[np.ndarray],
+    *,
+    change_db: float = CHANGE_DB,
+    support_px: int = CHANGE_SUPPORT,
+) -> tuple[np.ndarray, np.ndarray]:
     """Index of the date furthest from the stack median, and whether it counts.
 
-    A departure under 3 dB stays unlabeled, as does a patch under 8 pixels.
-    The index is -1 there.
+    A departure under ``change_db`` stays unlabeled, as does a patch under
+    ``support_px`` pixels. The index is -1 there. The counted pixels are
+    the ones coloured.
     """
 
     stack = np.stack(frames, axis=0)
@@ -77,21 +96,32 @@ def date_of_change(frames: list[np.ndarray]) -> tuple[np.ndarray, np.ndarray]:
     distance[~np.isfinite(distance)] = -1
     which = np.argmax(distance, axis=0).astype(np.int16)
     peak = distance.max(axis=0)
-    # Reuse the amplitude-change support rule so one speckled pixel is unlabeled.
-    keep = change_masks(median, median + np.where(peak >= CHANGE_DB, peak, 0))[1]
+    # Same support rule as amplitude change, so one speckled pixel is unlabeled.
+    keep = change_masks(
+        median,
+        median + np.where(peak >= change_db, peak, 0),
+        change_db=change_db,
+        support_px=support_px,
+    )[1]
     which = np.where(keep, which, -1)
     return which, keep
 
 
 def site_activity(
-    frame: np.ndarray, median: np.ndarray, mode_db: float
+    frame: np.ndarray,
+    median: np.ndarray,
+    mode_db: float,
+    *,
+    bright_offset_db: float = 8.0,
+    min_pixels: int = 4,
 ) -> tuple[np.ndarray, np.ndarray]:
     """Bright clusters that are new on this date, and clusters the median had."""
 
-    present = np.isfinite(frame) & (frame >= mode_db + 8.0)
-    usual = np.isfinite(median) & (median >= mode_db + 8.0)
-    appeared = _large_components(present & ~usual, 4)
-    left = _large_components(usual & ~present, 4)
+    present = np.isfinite(frame) & (frame >= mode_db + bright_offset_db)
+    usual = np.isfinite(median) & (median >= mode_db + bright_offset_db)
+    count = int(min_pixels)
+    appeared = _large_components(present & ~usual, count)
+    left = _large_components(usual & ~present, count)
     return appeared, left
 
 
@@ -101,11 +131,17 @@ def repeat_counts(
     modes: list[float],
     col_m: float,
     row_m: float,
+    *,
+    match_m: float = 80.0,
 ) -> list[tuple[float, float, int]]:
-    """Centres of waterline returns and how many dates they appear on."""
+    """Centres of waterline returns and how many dates they appear on.
+
+    ``match_m`` is how far apart two hits can sit and still be one return.
+    Six overview pixels remain the floor under that distance.
+    """
 
     groups: list[list[tuple[float, float]]] = []
-    limit = max(80.0, min(col_m, row_m) * 6)
+    limit = max(match_m, min(col_m, row_m) * 6)
     for frame, mask, mode in zip(frames, masks, modes, strict=True):
         for component in waterline_returns(frame, mask, mode, col_m, row_m):
             placed = False

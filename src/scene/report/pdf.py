@@ -1,6 +1,6 @@
 """Render a saved report as a PDF.
 
-This module reads only the stored report and the belt's ``overview.png`` files.
+This module reads only the stored report and the toolkit's ``overview.png`` files.
 It never imports a chat model, so building a PDF needs no key and no network.
 ``write_pdf`` is the only function that loads WeasyPrint, and the route calls
 the model nowhere on this path. The narrator line is not part of the document.
@@ -12,9 +12,9 @@ import html
 import importlib
 from pathlib import Path
 
-from scene.belt.catalog import analysis_dir, tool_spec
 from scene.paths import valid_scene_id
 from scene.report.store import Report, ReportSection
+from scene.toolkit.catalog import analysis_dir, tool_spec
 
 _STATUS_TEXT = {
     "done": "Measured",
@@ -113,7 +113,7 @@ def _section(scene_id: str, section: ReportSection) -> str:
 
 
 def _chosen_prose(section: ReportSection) -> str:
-    """The reading when a done section has one, otherwise the belt briefing.
+    """The reading when a done section has one, otherwise the toolkit briefing.
 
     Locked and failed sections keep ``briefing_md`` even if a reading was stored.
     Whitespace alone does not count as a reading.
@@ -125,7 +125,7 @@ def _chosen_prose(section: ReportSection) -> str:
 
 
 def _summary(measurement: dict[str, object] | None) -> str:
-    """The belt's labelled values, then its limit sentence."""
+    """The toolkit's labelled values, then its limit sentence."""
 
     if measurement is None:
         return ""
@@ -203,7 +203,7 @@ def _picture(scene_id: str, section: ReportSection) -> Path | None:
 
 
 def _label(tool_id: str) -> str:
-    """The belt's tool label, or the id for a tool the belt no longer lists."""
+    """The toolkit's tool label, or the id for a tool the toolkit no longer lists."""
 
     try:
         return tool_spec(tool_id).label
