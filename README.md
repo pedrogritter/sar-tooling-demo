@@ -1,6 +1,6 @@
 <a id="readme-top"></a>
 
-<p align="center"><img src="./demo/lisbon/scenes/ICEYE_EYCKP5_20251024T135309Z_6724574_X52_SLF/preview.png" alt="ICEYE-X52 spotlight quicklook over Lisbon and the 25 de Abril bridge" width="420" /></p>
+<p align="center"><img src="./demo/sar_toolkit_demo.gif" alt="ICEYE-X52 spotlight quicklook over Lisbon and the 25 de Abril bridge" width="720" /></p>
 
 <h1 align="center">SAR Toolkit</h1>
 
